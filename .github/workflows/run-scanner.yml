@@ -9,7 +9,8 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     env:
-      COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
+      COINLIST_API_KEY: ${{ secrets.48c7cd96-b940-4f13-bde7-dfb0b03f22d8
+ }}
     steps:
       - uses: actions/checkout@v3
 
