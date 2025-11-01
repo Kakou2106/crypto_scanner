@@ -1,0 +1,26 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+logs/
+quantum_scanner.log
+*.log
+
+# Base de données SQLite
+data/*.db
+*.sqlite
+
+# Environnements / clés
+.env
+
+# Docker
+*.pid
+
+# IDE / système
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
