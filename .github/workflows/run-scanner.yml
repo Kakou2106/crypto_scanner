@@ -9,15 +9,14 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     env:
-      COINLIST_API_KEY: ${{ secrets.GrokZYzazJ0du8QOZdcw5kD6cc0I8kP43eYd3dSAHVd+fdGXKoEgI9auYCekFIDDC8FIL8PAvMqsM9Ndk7kIlw==
- }}
+      COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
     steps:
       - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: 3.11
 
       - name: Install dependencies
         run: |
