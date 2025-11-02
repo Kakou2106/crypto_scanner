@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌌 QUANTUM SCANNER COMPLET MULTI-SOURCES 2025
-Scraping, validation, scoring, historique en SQLite, alertes Telegram.
-Sources : CoinList, ICOdrops, Airdrops.io, Binance Launchpool, Launchpad.io, CoinGecko
+🌌 QUANTUM SCANNER MULTI-SOURCES AVANCÉ - Scraping, APIs, validation, proxys, rate-limit
+
+Ciblage EARLY STAGE Tokens depuis CoinList, ICOdrops, Airdrops.io,
+Binance Launchpool, Launchpad.io avec données financières en direct via CoinGecko.
 """
 
 import asyncio
@@ -148,25 +149,26 @@ class QuantumScraper:
         self.session = await self._new_session()
         return self
 
-    async def __aexit__(self, exc_type, exc, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.session.close()
 
     async def _new_session(self):
         connector = aiohttp.TCPConnector(limit_per_host=10)
+        logger.debug(f"Opening new aiohttp session")
+        return aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=30))
+
+    async def _get(self, url: str, retries=3):
         proxy = None
         if PROXIES:
             proxy = PROXIES[self.proxy_index % len(PROXIES)]
             self.proxy_index += 1
-        logger.debug(f"Opening session with proxy={proxy}")
-        return aiohttp.ClientSession(connector=connector, proxy=proxy, timeout=aiohttp.ClientTimeout(total=30))
 
-    async def _get(self, url: str, retries=3, delay=1):
         for attempt in range(retries):
             try:
-                async with self.session.get(url) as resp:
+                async with self.session.get(url, proxy=proxy) as resp:
                     if resp.status == 429:
                         retry_after = int(resp.headers.get("Retry-After", "10"))
-                        logger.warning(f"Rate limited {url}, waiting {retry_after}s")
+                        logger.warning(f"Rate limited on {url}, sleeping {retry_after}s")
                         await asyncio.sleep(retry_after + 1)
                         await self.session.close()
                         self.session = await self._new_session()
@@ -174,14 +176,14 @@ class QuantumScraper:
                     elif 200 <= resp.status < 300:
                         return await resp.text()
                     else:
-                        logger.warning(f"HTTP {resp.status} on {url}")
+                        logger.warning(f"HTTP {resp.status} for {url}")
                         return None
             except Exception as e:
-                logger.error(f"Error during GET {url}: {e}")
-            await asyncio.sleep(delay * (2 ** attempt))
+                logger.error(f"Error fetching {url}: {e}")
+            await asyncio.sleep(2 ** attempt)
         return None
 
-    # --- Adjusted selectors for CoinList ---
+    # --- Adapted selectors for CoinList ---
     async def scrape_coinlist(self) -> List[Project]:
         logger.info("Scraping CoinList...")
         projects = []
@@ -197,7 +199,6 @@ class QuantumScraper:
                 proj_url = card['href'] if card.has_attr('href') else None
                 if proj_url and not proj_url.startswith('http'):
                     proj_url = 'https://coinlist.co' + proj_url
-                # Symbol extraction placeholder
                 symbol = None
                 projects.append(Project(
                     name=name,
@@ -211,7 +212,7 @@ class QuantumScraper:
         logger.info(f"CoinList: {len(projects)} projects found")
         return projects
 
-    # --- Adjust selectors ICOdrops ---
+    # --- ICOdrops scraping ---
     async def scrape_icodrops(self) -> List[Project]:
         logger.info("Scraping ICOdrops...")
         projects = []
@@ -365,7 +366,6 @@ class QuantumScraper:
 
         logger.info(f"Total projects collected raw: {len(all_projects)}")
 
-        # Enrich projects with CoinGecko data when symbol present
         for p in all_projects:
             if p.symbol:
                 data = await self.fetch_token_data_coingecko(p.symbol)
@@ -373,20 +373,18 @@ class QuantumScraper:
                 p.fdv = data.get("fdv") or p.fdv
                 p.circulating_supply = data.get("circulating_supply")
                 p.price_usd = data.get("price_usd")
-            # To prevent fast API spam
             await asyncio.sleep(1.5)
 
         filtered = self.filter_projects(all_projects)
         logger.info(f"After market cap filter: {len(filtered)} projects")
         return filtered
 
-# -----------------------------------------------
-# Analyse et envoi Telegram avec validation liens
+# Analyse simple + Telegram
 
 class AdvancedAnalyzer:
     async def send_telegram(self, text: str):
         if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-            logger.warning("Telegram non configuré")
+            logger.warning("Telegram credentials not set.")
             return
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         async with aiohttp.ClientSession() as session:
@@ -397,11 +395,11 @@ class AdvancedAnalyzer:
                 "disable_web_page_preview": True
             }) as resp:
                 if resp.status == 200:
-                    logger.info("Telegram alert sent")
+                    logger.info("Telegram alert sent.")
                 else:
                     logger.error(f"Telegram error: {resp.status}")
 
-    def score_project(self, project: Project) -> float:
+    def calculate_score(self, project: Project) -> float:
         score = 50.0
         if project.market_cap:
             score += max(0, 50 - (project.market_cap / MAX_MARKET_CAP_EUR)*50)
@@ -426,7 +424,7 @@ class AdvancedAnalyzer:
     async def analyze_projects(self, projects: List[Project], db: DBManager):
         count = 0
         for p in projects:
-            score = self.score_project(p)
+            score = self.calculate_score(p)
             go = score >= 60
             rationale = f"Score: {score:.1f} {'GO' if go else 'NO GO'}"
             analysis = Analysis(project=p, score_global=score, go_decision=go,
@@ -445,9 +443,9 @@ class AdvancedAnalyzer:
                 await self.send_telegram(message)
                 count += 1
             await asyncio.sleep(0.5)
-        logger.info(f"{count} projets GO alertés")
+        logger.info(f"{count} projets GO alertés.")
 
-# ----------------------- MAIN -----------------------
+# MAIN ASYNC
 
 async def main():
     db_manager = DBManager()
@@ -460,4 +458,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
