@@ -6,7 +6,8 @@ schedule==1.2.0
 python-dotenv==1.0.0
 aiosqlite>=0.19.0
 PyYAML>=6.0
-python-telegram-bot>=20.0
+python-telegram-bot>=20.3
+feedparser==6.0.10
 
 # Data processing
 pandas==2.1.4
