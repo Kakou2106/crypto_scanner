@@ -1,8 +1,6 @@
-# Dockerfile
-
 FROM python:3.10-slim
 
-# Mettre à jour et installer les dépendances système nécessaires
+# Installer les dépendances système
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -14,15 +12,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Définir le répertoire de travail
 WORKDIR /app
 
-# Copier les fichiers requirements et installer les dépendances Python
+# Copier et installer les dépendances Python
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier tout le code source
 COPY . /app/
 
-# Exposer un port si nécessaire (pour API web éventuelle)
+# Exposer un port si API Web future
 EXPOSE 8000
 
-# Commande pour lancer le scanner python
+# Lancer le scanner
 CMD ["python", "scanner.py"]

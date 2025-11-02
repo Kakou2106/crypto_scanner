@@ -7,13 +7,12 @@ services:
       dockerfile: Dockerfile
     container_name: quantum-scanner-ultimate
     restart: unless-stopped
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    env_file:
-      - .env
     environment:
-      # Pour surcharge ou variables obligatoires (peut être vide si tout est dans .env)
       - PYTHONUNBUFFERED=1
     healthcheck:
       test: ["CMD", "python", "-c", "import aiosqlite, asyncio; async def check_db(): async with aiosqlite.connect('data/quantum_scanner.db') as db: pass; asyncio.run(check_db())"]
