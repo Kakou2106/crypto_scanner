@@ -704,4 +704,8 @@ async def initialize_sample_projects():
 ]
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if "--once" in sys.argv:
+        logger.info("🚀 Starting one-time Quantum Scanner...")
+        asyncio.run(main_scan())
+    else:
+        logger.info("🔧 Use --once for single scan")
