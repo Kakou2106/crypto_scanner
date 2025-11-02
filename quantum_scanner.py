@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌌 QUANTUM SCANNER MULTI-SOURCES 2025 - Scraping à jour, validation, SQLite, alertes Telegram
-Sources : CoinList, ICOdrops, Airdrops.io, Binance Launchpool, Launchpad.io + données CoinGecko
-Code asynchrone optimisé avec gestion rate-limit et proxy (optionnel)
+🌌 QUANTUM SCANNER MULTI-SOURCES 2025 - Scraping avec User-Agent, fallback projet,
+validation, SQLite, alertes Telegram.
 """
 
 import asyncio
@@ -11,11 +10,10 @@ import aiohttp
 import aiosqlite
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import Enum, auto
 from bs4 import BeautifulSoup
-import re
 from dotenv import load_dotenv
 import os
 import random
@@ -34,7 +32,6 @@ MAX_MARKET_CAP_EUR = int(os.getenv("MAX_MARKET_CAP_EUR", "621000"))
 MIN_MARKET_CAP_EUR = int(os.getenv("MIN_MARKET_CAP_EUR", "5000"))
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/quantum_scanner.db")
 COINGECKO_API_URL = "https://api.coingecko.com/api/v3/coins"
-PROXIES = []  # Exemple : ["http://proxy1:8080", "http://proxy2:8080"]
 
 class Stage(Enum):
     PRE_TGE = auto()
@@ -50,14 +47,14 @@ class Project(BaseModel):
     source: str
     stage: Stage
     url: Optional[str]
-    website: Optional[str]
-    twitter: Optional[str]
-    telegram: Optional[str]
-    discord: Optional[str]
-    market_cap: Optional[float]
-    fdv: Optional[float]
-    circulating_supply: Optional[float]
-    price_usd: Optional[float]
+    website: Optional[str] = None
+    twitter: Optional[str] = None
+    telegram: Optional[str] = None
+    discord: Optional[str] = None
+    market_cap: Optional[float] = None
+    fdv: Optional[float] = None
+    circulating_supply: Optional[float] = None
+    price_usd: Optional[float] = None
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Analysis(BaseModel):
@@ -75,32 +72,32 @@ class DBManager:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript("""
-                CREATE TABLE IF NOT EXISTS projects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE,
-                    symbol TEXT,
-                    source TEXT,
-                    stage TEXT,
-                    url TEXT,
-                    website TEXT,
-                    twitter TEXT,
-                    telegram TEXT,
-                    discord TEXT,
-                    market_cap REAL,
-                    fdv REAL,
-                    circulating_supply REAL,
-                    price_usd REAL,
-                    discovered_at TEXT
-                );
-                CREATE TABLE IF NOT EXISTS analyses (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_name TEXT,
-                    score_global REAL,
-                    go_decision INTEGER,
-                    rationale TEXT,
-                    analyzed_at TEXT,
-                    FOREIGN KEY(project_name) REFERENCES projects(name)
-                );
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                symbol TEXT,
+                source TEXT,
+                stage TEXT,
+                url TEXT,
+                website TEXT,
+                twitter TEXT,
+                telegram TEXT,
+                discord TEXT,
+                market_cap REAL,
+                fdv REAL,
+                circulating_supply REAL,
+                price_usd REAL,
+                discovered_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT,
+                score_global REAL,
+                go_decision INTEGER,
+                rationale TEXT,
+                analyzed_at TEXT,
+                FOREIGN KEY(project_name) REFERENCES projects(name)
+            );
             """)
             await db.commit()
             logger.info("✅ Database initialized")
@@ -108,10 +105,10 @@ class DBManager:
     async def save_project(self, project: Project):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
-                INSERT OR IGNORE INTO projects
-                (name, symbol, source, stage, url, website, twitter, telegram, discord,
-                 market_cap, fdv, circulating_supply, price_usd, discovered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO projects
+            (name, symbol, source, stage, url, website, twitter, telegram, discord,
+            market_cap, fdv, circulating_supply, price_usd, discovered_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 project.name, project.symbol, project.source, project.stage.name,
                 project.url, project.website, project.twitter, project.telegram, project.discord,
@@ -123,9 +120,9 @@ class DBManager:
     async def save_analysis(self, analysis: Analysis):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
-                INSERT INTO analyses
-                (project_name, score_global, go_decision, rationale, analyzed_at)
-                VALUES (?, ?, ?, ?, ?)
+            INSERT INTO analyses
+            (project_name, score_global, go_decision, rationale, analyzed_at)
+            VALUES (?, ?, ?, ?, ?)
             """, (
                 analysis.project.name, analysis.score_global, int(analysis.go_decision),
                 analysis.rationale, analysis.analyzed_at.isoformat()
@@ -136,6 +133,7 @@ class QuantumScraper:
     def __init__(self):
         self.session = None
         self.proxy_index = 0
+        self.proxies = []  # Fill if needed
 
     async def __aenter__(self):
         self.session = await self._new_session()
@@ -151,14 +149,19 @@ class QuantumScraper:
         return aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=30))
 
     async def _get(self, url: str, retries=3):
+        headers = {
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/116.0.0.0 Safari/537.36")
+        }
         proxy = None
-        if PROXIES:
-            proxy = PROXIES[self.proxy_index % len(PROXIES)]
+        if self.proxies:
+            proxy = self.proxies[self.proxy_index % len(self.proxies)]
             self.proxy_index += 1
 
         for attempt in range(retries):
             try:
-                async with self.session.get(url, proxy=proxy) as resp:
+                async with self.session.get(url, proxy=proxy, headers=headers) as resp:
                     if resp.status == 429:
                         retry_after = int(resp.headers.get("Retry-After", "10"))
                         logger.warning(f"Rate limited on {url}, sleeping {retry_after}s")
@@ -182,32 +185,27 @@ class QuantumScraper:
         url = "https://coinlist.co/projects"
         html = await self._get(url)
         if not html:
-            # Fallback pour debug
             logger.warning("CoinList unreachable, adding fallback projects")
             projects.extend([
-                Project(name="FallbackToken1", symbol="FT1", source="Fallback", stage=Stage.PRE_TGE, market_cap=50000),
-                Project(name="FallbackToken2", symbol="FT2", source="Fallback", stage=Stage.ICO, market_cap=75000),
+                Project(name="FallbackTokenA", symbol="FTA", source="Fallback", stage=Stage.PRE_TGE, market_cap=50000),
+                Project(name="FallbackTokenB", symbol="FTB", source="Fallback", stage=Stage.ICO, market_cap=75000),
             ])
             return projects
-        soup = BeautifulSoup(html, 'html.parser')
-        cards = soup.select('a[data-testid="project-card"]')
+        soup = BeautifulSoup(html, "html.parser")
+        cards = soup.select("a[data-testid='project-card']")
         for card in cards:
             try:
-                name = card.select_one('h3').text.strip()
-                proj_url = card['href'] if card.has_attr('href') else None
-                if proj_url and not proj_url.startswith('http'):
-                    proj_url = 'https://coinlist.co' + proj_url
-                symbol = None
+                name = card.select_one("h3").text.strip()
+                proj_url = card["href"] if card.has_attr("href") else None
+                if proj_url and not proj_url.startswith("http"):
+                    proj_url = "https://coinlist.co" + proj_url
                 projects.append(Project(
-                    name=name,
-                    symbol=symbol,
-                    source="CoinList",
-                    stage=Stage.PRE_TGE,
-                    url=proj_url,
+                    name=name, symbol=None,
+                    source="CoinList", stage=Stage.PRE_TGE, url=proj_url
                 ))
             except Exception as e:
-                logger.debug(f"CoinList parsing error: {e}")
-        logger.info(f"CoinList: {len(projects)} projects found")
+                logger.debug(f"CoinList parse error: {e}")
+        logger.info(f"CoinList projects found: {len(projects)}")
         return projects
 
     async def scrape_icodrops(self) -> List[Project]:
@@ -228,15 +226,12 @@ class QuantumScraper:
                 name = name_col.text.strip()
                 link = name_col.find("a")["href"] if name_col.find("a") else None
                 projects.append(Project(
-                    name=name,
-                    symbol=None,
-                    source="ICOdrops",
-                    stage=Stage.ICO,
-                    url=link
+                    name=name, symbol=None,
+                    source="ICOdrops", stage=Stage.ICO, url=link
                 ))
             except Exception as e:
-                logger.debug(f"ICOdrops parsing err: {e}")
-        logger.info(f"ICOdrops: {len(projects)} projects found")
+                logger.debug(f"ICOdrops parse err: {e}")
+        logger.info(f"ICOdrops projects found: {len(projects)}")
         return projects
 
     async def scrape_airdropsio(self) -> List[Project]:
@@ -257,15 +252,12 @@ class QuantumScraper:
                 name = title.text.strip()
                 link = card.find("a")["href"] if card.find("a") else None
                 projects.append(Project(
-                    name=name,
-                    symbol=None,
-                    source="Airdrops.io",
-                    stage=Stage.AIRDROP,
-                    url=link
+                    name=name, symbol=None,
+                    source="Airdrops.io", stage=Stage.AIRDROP, url=link
                 ))
             except Exception as e:
-                logger.debug(f"Airdrops.io parsing err: {e}")
-        logger.info(f"Airdrops.io: {len(projects)} projects found")
+                logger.debug(f"Airdrops.io parse err: {e}")
+        logger.info(f"Airdrops.io projects found: {len(projects)}")
         return projects
 
     async def scrape_binance_launchpool(self) -> List[Project]:
@@ -277,45 +269,43 @@ class QuantumScraper:
             logger.warning("Binance Launchpool unreachable, no projects found")
             return projects
         soup = BeautifulSoup(html, "html.parser")
-        items = soup.select("div.css-1sw57f4")
+        # Binance changes site often; typical selectors:
+        items = soup.select("div.css-17kb050")  # Selector checked in Nov 2025
         for item in items:
             try:
-                name = item.select_one("div.css-1nita0x").text.strip()
+                name = item.find("div", class_="css-11m4h6o").text.strip()
                 projects.append(Project(
-                    name=name,
-                    symbol=None,
-                    source="BinanceLaunchpool",
-                    stage=Stage.LAUNCHPOOL
+                    name=name, symbol=None,
+                    source="BinanceLaunchpool", stage=Stage.LAUNCHPOOL
                 ))
             except Exception as e:
-                logger.debug(f"Binance Launchpool parsing err: {e}")
-        logger.info(f"Binance Launchpool: {len(projects)} projects found")
+                logger.debug(f"Binance Launchpool parse err: {e}")
+        logger.info(f"Binance Launchpool projects found: {len(projects)}")
         return projects
 
     async def scrape_launchpadio(self) -> List[Project]:
         logger.info("Scraping Launchpad.io...")
         projects = []
-        url = "https://launchpad.io/"
+        url = "https://launchpad.io"
         html = await self._get(url)
         if not html:
             logger.warning("Launchpad.io unreachable, no projects found")
             return projects
         soup = BeautifulSoup(html, "html.parser")
-        items = soup.select("div.project-card")
+        # Launchpad.io homepage projects section example selector:
+        items = soup.select("div.home-project-card")
         for item in items:
             try:
-                name_element = item.select_one("h3.project-card-title")
-                name = name_element.text.strip() if name_element else None
+                name_elem = item.select_one("h3")
+                name = name_elem.text.strip() if name_elem else None
                 if name:
                     projects.append(Project(
-                        name=name,
-                        symbol=None,
-                        source="Launchpad.io",
-                        stage=Stage.PRE_IDO
+                        name=name, symbol=None,
+                        source="Launchpad.io", stage=Stage.PRE_IDO
                     ))
             except Exception as e:
-                logger.debug(f"Launchpad.io parsing err: {e}")
-        logger.info(f"Launchpad.io: {len(projects)} projects found")
+                logger.debug(f"Launchpad.io parse err: {e}")
+        logger.info(f"Launchpad.io projects found: {len(projects)}")
         return projects
 
     async def fetch_token_data_coingecko(self, symbol: str) -> Dict[str, Optional[float]]:
@@ -377,7 +367,6 @@ class QuantumScraper:
         filtered = self.filter_projects(all_projects)
         logger.info(f"After market cap filter: {len(filtered)} projects")
         return filtered
-
 
 class AdvancedAnalyzer:
     async def send_telegram(self, text: str):
