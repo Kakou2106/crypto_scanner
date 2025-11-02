@@ -115,53 +115,43 @@ class Analysis(BaseModel):
 # =======================================================================
 
 class Validator:
-    def __init__(self):
-        self.session = None
-
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self.session:
-            await self.session.close()
 
     async def is_valid_url(self, url: str) -> bool:
         if not url:
             return False
         try:
-            async with self.session.get(url) as resp:
-                if resp.status != 200:
-                    return False
-                text = await resp.text()
-                lowered = text.lower()
-                blacklist = ["domain for sale", "coming soon", "buy this domain", "404", "not found"]
-                if any(word in lowered for word in blacklist):
-                    return False
-                return True
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return False
+                    text = await resp.text()
+                    lowered = text.lower()
+                    blacklist = ["domain for sale", "coming soon", "buy this domain", "404", "not found"]
+                    if any(word in lowered for word in blacklist):
+                        return False
+                    return True
         except:
             return False
 
     async def twitter_account_exists(self, twitter_url: str) -> bool:
         if not twitter_url:
             return False
-        # Extraction du handle Twitter
         handle = twitter_url.rstrip('/').split('/')[-1]
         try:
-            async with self.session.get(f"https://twitter.com/{handle}") as resp:
-                # 200 OK = existant; 404 ou autre = inexistant
-                return resp.status == 200
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(f"https://twitter.com/{handle}") as resp:
+                    return resp.status == 200
         except:
             return False
 
     async def telegram_channel_exists(self, tg_url: str) -> bool:
         if not tg_url:
             return False
-        # On extrait le nom du canal/group Telegram
         identifier = tg_url.rstrip('/').split('/')[-1]
         try:
-            async with self.session.get(f"https://t.me/{identifier}") as resp:
-                return resp.status == 200
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(f"https://t.me/{identifier}") as resp:
+                    return resp.status == 200
         except:
             return False
 
@@ -169,8 +159,9 @@ class Validator:
         if not discord_url:
             return False
         try:
-            async with self.session.get(discord_url) as resp:
-                return resp.status == 200
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(discord_url) as resp:
+                    return resp.status == 200
         except:
             return False
 
@@ -191,7 +182,7 @@ class EarlyStageScanner:
             await self.session.close()
 
     async def find_early_stage_gems(self) -> List[Project]:
-        # Pour l'exemple on retourne trois projets factices valides
+        # Exemple simplifié avec un projet fictif valide
         return [
             Project(
                 name="QuantumAI",
@@ -209,7 +200,6 @@ class EarlyStageScanner:
                 vcs=["a16z", "Paradigm"],
                 blockchain="Ethereum"
             ),
-            # Vous pouvez ajouter d'autres projets fictifs ici
         ]
 
 # =======================================================================
@@ -218,15 +208,9 @@ class EarlyStageScanner:
 
 class QuantumAnalyzer:
     def __init__(self):
-        self.validator = None
+        self.validator = Validator()
 
     async def analyze_project(self, project: Project) -> Optional[Analysis]:
-        # Initialiser validator
-        if not self.validator:
-            self.validator = Validator()
-            await self.validator.__aenter__()
-
-        # Validation liens & comptes
         valid_website = await self.validator.is_valid_url(project.website)
         valid_twitter = await self.validator.twitter_account_exists(project.twitter)
         valid_telegram = await self.validator.telegram_channel_exists(project.telegram)
@@ -249,7 +233,6 @@ class QuantumAnalyzer:
                 suggested_buy_price=None
             )
 
-        # Sinon poursuivre analyse classique
         ratios = self._calculate_21_ratios(project)
         category_scores = self._calculate_category_scores(ratios)
         score_global = self._calculate_global_score(category_scores)
@@ -260,7 +243,7 @@ class QuantumAnalyzer:
 
         rationale = self._generate_rationale(score_global, historical_correlation, top_drivers)
 
-        suggested_buy_price = self._calculate_suggested_buy_price(project, ratios)
+        suggested_buy_price = self._calculate_suggested_buy_price(project)
 
         return Analysis(
             project=project,
@@ -370,15 +353,16 @@ class QuantumAnalyzer:
     def _calculate_rugpull_risk(self) -> float:
         return random.uniform(75.0, 95.0)
 
-    def _calculate_suggested_buy_price(self, project: Project, ratios: RatioSet) -> float:
-        circ_supply = 1_000_000  # Placeholder ou extraire de données si dispo
-        price_estimate = project.fdv / circ_supply if circ_supply > 0 else 0.01
-        # Adopter un coefficient conservateur selon sécurité
-        coef = 0.8
+    def _calculate_suggested_buy_price(self, project: Project) -> float:
+        circ_supply = 1_000_000  # Hypothèse fixe ou à récupérer si possible
+        if circ_supply <= 0:
+            return 0.01
+        price_estimate = project.fdv / circ_supply
+        coef = 0.8  # Coefficient de sécurité conservateur
         return round(price_estimate * coef, 6)
 
 # =======================================================================
-# NOTIFICATIONS TELEGRAM AVEC VERIFICATION
+# NOTIFICATIONS TELEGRAM
 # =======================================================================
 
 async def send_telegram_alert(analysis: Analysis):
