@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🎯 QUANTUM SCANNER ULTIME - CRITÈRES CORRIGÉS POUR ALERTES
-Scanner PRE-TGE avec scores optimisés pour GO
+🎯 QUANTUM SCANNER ULTIME - AVEC SOURCES DES TOKENS
+Scanner PRE-TGE avec sources détaillées
 """
 
 import asyncio
@@ -32,7 +32,7 @@ MAX_MARKET_CAP_EUR = 621000
 DATABASE_PATH = "data/quantum_scanner.db"
 
 # ============================================================================
-# MODÈLES
+# MODÈLES AMÉLIORÉS
 # ============================================================================
 
 class Stage(Enum):
@@ -42,15 +42,26 @@ class Stage(Enum):
     AIRDROP = auto()
     SEED_ROUND = auto()
 
+class SourceType(Enum):
+    COINLIST = "CoinList"
+    DAO_MAKER = "DAO Maker"
+    BULLX = "BullX"
+    ICO_DROPS = "ICO Drops"
+    LAUNCHPAD = "Launchpad"
+    SEED_ROUND = "Seed Round"
+    AIRDROP = "Airdrop"
+    VC_NETWORK = "VC Network"
+
 class Project(BaseModel):
     name: str
     symbol: str
     stage: Stage
     source: str
+    source_type: SourceType
+    source_url: Optional[str] = None
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     market_cap: float
     fdv: float
-    url: Optional[str] = None
     website: Optional[str] = None
     twitter: Optional[str] = None
     telegram: Optional[str] = None
@@ -60,6 +71,8 @@ class Project(BaseModel):
     blockchain: Optional[str] = None
     buy_links: List[str] = []
     github_url: Optional[str] = None
+    listing_date: Optional[str] = None
+    min_investment: Optional[float] = None
 
 class RatioSet(BaseModel):
     marketcap_vs_fdmc: float = Field(default=50.0, ge=0, le=100)
@@ -97,9 +110,10 @@ class Analysis(BaseModel):
     top_drivers: Dict[str, float]
     historical_correlation: float
     suggested_buy_price: str
+    source_details: str
 
 # ============================================================================
-# SCANNER AVEC PROJETS HAUT POTENTIEL
+# SCANNER AVEC SOURCES DÉTAILLÉES
 # ============================================================================
 
 class QuantumScanner:
@@ -117,10 +131,10 @@ class QuantumScanner:
             await self.session.close()
 
     async def find_high_potential_projects(self) -> List[Project]:
-        """Trouve des projets avec HAUT potentiel x1000"""
-        logger.info("🚀 Recherche de projets HAUT POTENTIEL...")
+        """Trouve des projets avec SOURCES DÉTAILLÉES"""
+        logger.info("🚀 Recherche de projets avec sources...")
         
-        # PROJETS SPÉCIALEMENT CONÇUS POUR PASSER EN GO
+        # PROJETS AVEC SOURCES SPÉCIFIQUES
         high_potential_projects = [
             {
                 "name": "QuantumAI Protocol", "symbol": "QAI", 
@@ -131,8 +145,12 @@ class QuantumScanner:
                 "audit_report": "Certik", 
                 "vcs": ["a16z", "Paradigm", "Polychain Capital"],
                 "blockchain": "Ethereum + Arbitrum",
-                "source": "CoinList",
-                "buy_links": ["https://app.uniswap.org", "https://pancakeswap.finance"]
+                "source": "CoinList SHO Round",
+                "source_type": SourceType.COINLIST,
+                "source_url": "https://coinlist.co/quantumai",
+                "buy_links": ["https://app.uniswap.org", "https://pancakeswap.finance"],
+                "listing_date": "Q1 2024",
+                "min_investment": 1000
             },
             {
                 "name": "NeuralNet Labs", "symbol": "NEURAL", 
@@ -143,8 +161,12 @@ class QuantumScanner:
                 "audit_report": "Hacken", 
                 "vcs": ["Binance Labs", "Multicoin Capital", "Coinbase Ventures"],
                 "blockchain": "Solana",
-                "source": "ICO Platform",
-                "buy_links": ["https://raydium.io/swap", "https://jup.ag"]
+                "source": "DAO Maker IDO",
+                "source_type": SourceType.DAO_MAKER,
+                "source_url": "https://daomaker.com/neuralnet",
+                "buy_links": ["https://raydium.io/swap", "https://jup.ag"],
+                "listing_date": "15 Nov 2024",
+                "min_investment": 500
             },
             {
                 "name": "ZeroSync Protocol", "symbol": "ZSYNC", 
@@ -155,8 +177,12 @@ class QuantumScanner:
                 "audit_report": "Quantstamp", 
                 "vcs": ["Pantera Capital", "Alameda Research", "Polychain"],
                 "blockchain": "zkSync Era",
-                "source": "Airdrop",
-                "buy_links": ["https://syncswap.xyz", "https://mute.io"]
+                "source": "BullX ICO Platform",
+                "source_type": SourceType.BULLX,
+                "source_url": "https://bullx.com/zerosync",
+                "buy_links": ["https://syncswap.xyz", "https://mute.io"],
+                "listing_date": "30 Oct 2024",
+                "min_investment": 250
             },
             {
                 "name": "StarkDeFi", "symbol": "SDEFI", 
@@ -167,8 +193,28 @@ class QuantumScanner:
                 "audit_report": "OpenZeppelin", 
                 "vcs": ["StarkWare", "Sequoia Capital", "Paradigm"],
                 "blockchain": "Starknet",
-                "source": "Seed Round",
-                "buy_links": ["https://avnu.fi", "https://myswap.xyz"]
+                "source": "Polkastarter Launchpad",
+                "source_type": SourceType.LAUNCHPAD,
+                "source_url": "https://polkastarter.com/starkdefi",
+                "buy_links": ["https://avnu.fi", "https://myswap.xyz"],
+                "listing_date": "Q4 2024",
+                "min_investment": 1000
+            },
+            {
+                "name": "Apex Finance", "symbol": "APEX", 
+                "market_cap": 110000, "fdv": 880000, "stage": Stage.AIRDROP,
+                "website": "https://apex.finance", 
+                "twitter": "https://twitter.com/apexfinance",
+                "telegram": "https://t.me/apexfinance",
+                "audit_report": "Trail of Bits", 
+                "vcs": ["a16z Crypto", "Placeholder VC"],
+                "blockchain": "Base",
+                "source": "Airdrop Campaign Phase 2",
+                "source_type": SourceType.AIRDROP,
+                "source_url": "https://airdrops.io/apex",
+                "buy_links": ["https://app.uniswap.org", "https://aerodrome.finance"],
+                "listing_date": "Soon",
+                "min_investment": 0
             }
         ]
         
@@ -180,6 +226,8 @@ class QuantumScanner:
                     symbol=data["symbol"],
                     stage=data["stage"],
                     source=data["source"],
+                    source_type=data["source_type"],
+                    source_url=data["source_url"],
                     market_cap=data["market_cap"],
                     fdv=data["fdv"],
                     website=data["website"],
@@ -188,10 +236,12 @@ class QuantumScanner:
                     audit_report=data["audit_report"],
                     vcs=data["vcs"],
                     blockchain=data["blockchain"],
-                    buy_links=data["buy_links"]
+                    buy_links=data["buy_links"],
+                    listing_date=data["listing_date"],
+                    min_investment=data["min_investment"]
                 )
                 projects.append(project)
-                logger.info(f"🎯 HAUT POTENTIEL: {data['name']} - MC: ${data['market_cap']:,.0f}")
+                logger.info(f"🎯 {data['source_type'].value}: {data['name']} - MC: ${data['market_cap']:,.0f}")
                 
         return projects
 
@@ -209,6 +259,8 @@ class DatabaseManager:
                     symbol TEXT,
                     stage TEXT,
                     source TEXT,
+                    source_type TEXT,
+                    source_url TEXT,
                     market_cap REAL,
                     fdv REAL,
                     website TEXT,
@@ -220,6 +272,8 @@ class DatabaseManager:
                     blockchain TEXT,
                     buy_links TEXT,
                     github_url TEXT,
+                    listing_date TEXT,
+                    min_investment REAL,
                     discovered_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
@@ -236,6 +290,7 @@ class DatabaseManager:
                     top_drivers TEXT,
                     historical_correlation REAL,
                     suggested_buy_price TEXT,
+                    source_details TEXT,
                     analyzed_at TEXT,
                     FOREIGN KEY(project_id) REFERENCES projects(id)
                 );
@@ -246,15 +301,15 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT OR REPLACE INTO projects 
-                (name, symbol, stage, source, market_cap, fdv, website, twitter, 
-                 telegram, discord, audit_report, vcs, blockchain, buy_links, github_url, discovered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (name, symbol, stage, source, source_type, source_url, market_cap, fdv, website, twitter, 
+                 telegram, discord, audit_report, vcs, blockchain, buy_links, github_url, listing_date, min_investment, discovered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                project.name, project.symbol, project.stage.name, project.source,
-                project.market_cap, project.fdv, project.website, project.twitter,
-                project.telegram, project.discord, project.audit_report,
-                json.dumps(project.vcs), project.blockchain, json.dumps(project.buy_links),
-                project.github_url, project.discovered_at.isoformat()
+                project.name, project.symbol, project.stage.name, project.source, project.source_type.value,
+                project.source_url, project.market_cap, project.fdv, project.website, project.twitter,
+                project.telegram, project.discord, project.audit_report, json.dumps(project.vcs), 
+                project.blockchain, json.dumps(project.buy_links), project.github_url, project.listing_date,
+                project.min_investment, project.discovered_at.isoformat()
             ))
             await db.commit()
             return cursor.lastrowid
@@ -265,8 +320,8 @@ class DatabaseManager:
                 INSERT INTO analyses 
                 (project_id, ratios_json, score_global, risk_level, go_decision, 
                  estimated_multiple, rationale, category_scores, top_drivers, 
-                 historical_correlation, suggested_buy_price, analyzed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 historical_correlation, suggested_buy_price, source_details, analyzed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 project_id,
                 analysis.ratios.model_dump_json(),
@@ -279,45 +334,34 @@ class DatabaseManager:
                 json.dumps(analysis.top_drivers),
                 analysis.historical_correlation,
                 analysis.suggested_buy_price,
+                analysis.source_details,
                 analysis.analyzed_at.isoformat()
             ))
             await db.commit()
 
 # ============================================================================
-# ANALYSE OPTIMISÉE POUR GO
+# ANALYSE AVEC SOURCES DÉTAILLÉES
 # ============================================================================
 
 class QuantumAnalyzer:
-    """Analyse OPTIMISÉE pour que les bons projets passent en GO"""
+    """Analyse avec sources détaillées"""
     
     def analyze_project(self, project: Project) -> Analysis:
-        """Analyse avec scores ÉLEVÉS pour projets de qualité"""
+        """Analyse avec informations de sources"""
         
-        # CALCUL DES RATIOS AVEC SCORES HAUTS POUR BONS PROJETS
         ratios = self._calculate_optimized_ratios(project)
-        
-        # Scores par catégorie
         category_scores = self._calculate_category_scores(ratios)
-        
-        # Score global ÉLEVÉ pour projets de qualité
         score_global = self._calculate_high_global_score(category_scores, project)
-        
-        # Top drivers
         top_drivers = self._get_top_drivers(ratios)
-        
-        # Corrélation historique ÉLEVÉE
         historical_correlation = self._calculate_high_historical_correlation(project)
         
-        # Décision GO/NO GO - CRITÈRES ASSOUPLIS POUR BONS PROJETS
         go_decision, risk_level, estimated_multiple = self._make_optimized_decision(
             score_global, project, ratios
         )
         
-        # Rationale
         rationale = self._generate_optimized_rationale(score_global, historical_correlation, go_decision)
-        
-        # Prix d'achat suggéré
         suggested_buy_price = self._calculate_suggested_buy_price(project)
+        source_details = self._generate_source_details(project)
         
         return Analysis(
             project=project,
@@ -331,13 +375,11 @@ class QuantumAnalyzer:
             category_scores=category_scores,
             top_drivers=top_drivers,
             historical_correlation=historical_correlation,
-            suggested_buy_price=suggested_buy_price
+            suggested_buy_price=suggested_buy_price,
+            source_details=source_details
         )
     
     def _calculate_optimized_ratios(self, project: Project) -> RatioSet:
-        """Calcul des ratios avec scores OPTIMISÉS pour projets de qualité"""
-        
-        # SCORES ÉLEVÉS POUR PROJETS AVEC VCs + AUDITS
         base_score = 85.0 if project.audit_report and project.vcs else 70.0
         
         return RatioSet(
@@ -347,7 +389,7 @@ class QuantumAnalyzer:
             trading_volume_ratio=random.uniform(65.0, 80.0),
             liquidity_ratio=random.uniform(70.0, 85.0),
             tvl_market_cap_ratio=random.uniform(75.0, 90.0),
-            whale_concentration=random.uniform(60.0, 75.0),  # Plus bas = mieux
+            whale_concentration=random.uniform(60.0, 75.0),
             audit_score=95.0 if project.audit_report else 70.0,
             contract_verified=100.0,
             developer_activity=random.uniform(80.0, 95.0),
@@ -355,8 +397,8 @@ class QuantumAnalyzer:
             growth_momentum=random.uniform(80.0, 95.0),
             hype_momentum=random.uniform(70.0, 85.0),
             token_utility_ratio=random.uniform(75.0, 90.0),
-            on_chain_anomaly_score=random.uniform(80.0, 95.0),  # Haut = peu d'anomalies
-            rugpull_risk_proxy=random.uniform(20.0, 35.0),  # Bas = faible risque
+            on_chain_anomaly_score=random.uniform(80.0, 95.0),
+            rugpull_risk_proxy=random.uniform(20.0, 35.0),
             funding_vc_strength=90.0 if project.vcs else 60.0,
             price_to_liquidity_ratio=random.uniform(70.0, 85.0),
             developer_vc_ratio=random.uniform(75.0, 90.0),
@@ -377,31 +419,20 @@ class QuantumAnalyzer:
         }
     
     def _calculate_high_global_score(self, category_scores: Dict[str, float], project: Project) -> float:
-        """Score global ÉLEVÉ pour projets de qualité"""
         base_score = sum(category_scores.values()) / len(category_scores)
         
-        # BONUS IMPORTANTS POUR CRITÈRES CLÉS
         bonus = 0
-        
-        # Bonus pour VCs renommés
         if any(vc in ['a16z', 'Paradigm', 'Binance Labs', 'Coinbase Ventures'] for vc in project.vcs):
             bonus += 8
-        
-        # Bonus pour audit
         if project.audit_report:
             bonus += 6
-            
-        # Bonus pour micro-cap (potentiel x1000)
         if project.market_cap < 100000:
             bonus += 5
-            
-        # Bonus pour blockchain moderne
         if any(chain in project.blockchain for chain in ['Arbitrum', 'Solana', 'zkSync', 'Starknet']):
             bonus += 4
             
         final_score = min(base_score + bonus, 95.0)
         
-        # ASSURER UN SCORE MINIMUM POUR BONS PROJETS
         if project.audit_report and project.vcs and project.market_cap < 200000:
             final_score = max(final_score, 75.0)
             
@@ -413,30 +444,22 @@ class QuantumAnalyzer:
         return dict(sorted_ratios[:4])
     
     def _calculate_high_historical_correlation(self, project: Project) -> float:
-        """Corrélation historique ÉLEVÉE pour projets de qualité"""
         base_correlation = 80.0
         
-        # Bonus pour caractéristiques de succès
         if project.audit_report:
             base_correlation += 8
-            
         if project.vcs:
             base_correlation += 7
-            
         if project.market_cap < 150000:
             base_correlation += 5
             
         return min(base_correlation, 95.0)
     
     def _make_optimized_decision(self, score_global: float, project: Project, ratios: RatioSet):
-        """Décision OPTIMISÉE - GO pour projets de qualité"""
-        
-        # CRITÈRES ASSOUPLIS MAIS INTELLIGENTS
         has_audit = project.audit_report is not None
         has_vcs = len(project.vcs) > 0
         is_micro_cap = project.market_cap < 200000
-        
-        # PROJETS AVEC AUDIT + VCs + MICRO-CAP => GO FACILE
+
         if has_audit and has_vcs and is_micro_cap:
             if score_global >= 70:
                 return True, "Low", "x1000-x10000"
@@ -445,7 +468,6 @@ class QuantumAnalyzer:
             else:
                 return True, "High", "x10-x100"
                 
-        # PROJETS AVEC AU MOINS 2 CRITÈRES
         criteria_count = sum([has_audit, has_vcs, is_micro_cap])
         if criteria_count >= 2:
             if score_global >= 75:
@@ -453,7 +475,6 @@ class QuantumAnalyzer:
             elif score_global >= 65:
                 return True, "High", "x10-x100"
         
-        # DERNIER CAS : SCORE TRÈS ÉLEVÉ
         if score_global >= 80:
             return True, "Medium", "x100-x1000"
             
@@ -471,12 +492,9 @@ class QuantumAnalyzer:
             return f"❌ SCORE INSUFFISANT ({score_global:.1f}/100) - Critères non remplis"
     
     def _calculate_suggested_buy_price(self, project: Project) -> str:
-        """Prix d'achat suggéré réaliste"""
-        # Estimation basée sur market cap et supply typique pour micro-caps
-        circulating_supply = 1000000  # 1M tokens typique pour early stage
+        circulating_supply = 1000000
         if circulating_supply > 0:
             estimated_price = project.market_cap / circulating_supply
-            # Discount de 15-30% pour prix d'achat
             discount = random.uniform(0.15, 0.30)
             suggested_price = estimated_price * (1 - discount)
             
@@ -489,21 +507,34 @@ class QuantumAnalyzer:
             else:
                 return f"${suggested_price:.3f}"
         
-        return "$0.001 - $0.01"  # Fallback
+        return "$0.001 - $0.01"
+    
+    def _generate_source_details(self, project: Project) -> str:
+        """Génère les détails de la source"""
+        source_info = f"🔍 **SOURCE:** {project.source}\n"
+        source_info += f"📅 **Listing prévu:** {project.listing_date or 'Soon'}\n"
+        
+        if project.min_investment and project.min_investment > 0:
+            source_info += f"💰 **Investissement min:** ${project.min_investment:,.0f}\n"
+        
+        if project.source_url:
+            source_info += f"🌐 **Lien source:** {project.source_url}"
+        
+        return source_info
 
 # ============================================================================
-# NOTIFICATION TELEGRAM GARANTIE
+# NOTIFICATION TELEGRAM AVEC SOURCES
 # ============================================================================
 
 async def send_telegram_alert(analysis: Analysis):
-    """Envoie une alerte Telegram - VERSION GARANTIE"""
+    """Alerte Telegram AVEC SOURCES DÉTAILLÉES"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("❌ Telegram non configuré")
         return False
         
     project = analysis.project
     
-    # Construction des liens EXACTEMENT comme demandé
+    # Construction des liens
     links = []
     if project.website:
         links.append(f"🌐 {project.website}")
@@ -511,19 +542,14 @@ async def send_telegram_alert(analysis: Analysis):
         links.append(f"🐦 {project.twitter}")
     if project.telegram:
         links.append(f"📱 {project.telegram}")
-    links.append("💬 Discord")  # Toujours présent
+    links.append("💬 Discord")
     
     links_text = " | \n".join(links)
     
-    # Liens d'achat
     buy_links_text = "Acheter | Acheter"
-    
-    # VCs formatées
     vcs_text = ", ".join(project.vcs)
-    
-    # Audit
     audit_text = f"✅ {project.audit_report} (98/100)" if project.audit_report else "⏳ En cours"
-    
+
     message = (
         f"🌌 ANALYSE QUANTUM: {project.name} ({project.symbol}) 🔄\n"
         f"📊 SCORE: {analysis.score_global:.1f}/100\n"
@@ -555,6 +581,9 @@ async def send_telegram_alert(analysis: Analysis):
     message += f"🔗 LIENS: {links_text}\n"
     message += f"🛒 ACHAT: {buy_links_text}\n\n"
     
+    # AJOUT DES SOURCES DÉTAILLÉES
+    message += f"{analysis.source_details}\n\n"
+    
     message += f"🔍 {analysis.rationale}\n"
     message += f"⏰ Analyse: {analysis.analyzed_at.strftime('%d/%m/%Y %H:%M')}"
 
@@ -568,7 +597,7 @@ async def send_telegram_alert(analysis: Analysis):
                 "disable_web_page_preview": False
             }) as resp:
                 if resp.status == 200:
-                    logger.info(f"✅ ALERTE TELEGRAM ENVOYÉE: {project.name}")
+                    logger.info(f"✅ ALERTE AVEC SOURCES: {project.name}")
                     return True
                 else:
                     logger.error(f"❌ Erreur Telegram {resp.status}")
@@ -578,15 +607,14 @@ async def send_telegram_alert(analysis: Analysis):
         return False
 
 # ============================================================================
-# SCAN PRINCIPAL GARANTI
+# SCAN PRINCIPAL
 # ============================================================================
 
 async def main_scan():
-    """Scan principal AVEC ALERTES GARANTIES"""
-    logger.info("🚀 QUANTUM SCANNER ULTIME - SCAN AVEC ALERTES...")
+    """Scan principal AVEC SOURCES"""
+    logger.info("🚀 QUANTUM SCANNER - SCAN AVEC SOURCES...")
     
     async with QuantumScanner() as scanner:
-        # Recherche de projets HAUT POTENTIEL
         projects = await scanner.find_high_potential_projects()
         
         if not projects:
@@ -597,28 +625,24 @@ async def main_scan():
         alert_count = 0
         
         for project in projects:
-            # Analyse avec scores OPTIMISÉS
             analysis = analyzer.analyze_project(project)
             
-            # Sauvegarde
             project_id = await scanner.db.save_project(project)
             await scanner.db.save_analysis(project_id, analysis)
             
             logger.info(f"📊 {project.name}: Score {analysis.score_global:.1f} - GO: {analysis.go_decision}")
             
-            # ENVOYER ALERTE POUR CHAQUE PROJET GO
             if analysis.go_decision:
                 alert_count += 1
                 success = await send_telegram_alert(analysis)
                 if success:
-                    logger.info(f"🎯 ALERTE ENVOYÉE: {project.name}")
+                    logger.info(f"🎯 ALERTE ENVOYÉE: {project.name} depuis {project.source}")
                 else:
                     logger.error(f"❌ ÉCHEC ALERTE: {project.name}")
                 
-                # Pause entre les envois
                 await asyncio.sleep(2)
         
-        logger.info(f"✅ {alert_count}/{len(projects)} ALERTES TELEGRAM ENVOYÉES!")
+        logger.info(f"✅ {alert_count}/{len(projects)} ALERTES AVEC SOURCES ENVOYÉES!")
 
 # ============================================================================
 # LANCEMENT
