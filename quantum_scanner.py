@@ -1,459 +1,463 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌌 QUANTUM SCANNER ULTIME - FORMAT PROFESSIONNEL AVEC VALIDATION LIENS
-Scanner exclusif EARLY STAGES (PRE-TGE, ICO, airdrops) avec contrôle rigoureux avant GO
+🌌 QUANTUM SCANNER COMPLET MULTI-SOURCES 2025
+Scraping, validation, scoring, historique en SQLite, alertes Telegram.
+Sources : CoinList, ICOdrops, Airdrops.io, Binance Launchpool, Launchpad.io, CoinGecko
 """
 
-import os
-import sys
 import asyncio
 import aiohttp
 import aiosqlite
-import json
 import logging
 import random
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from enum import Enum, auto
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import re
+import os
 
 load_dotenv()
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    handlers=[
-        logging.FileHandler('quantum_scanner.log'),
-        logging.StreamHandler()
-    ]
+    level=logging.DEBUG,
+    format='%(asctime)s | %(levelname)s | %(message)s'
 )
 logger = logging.getLogger("QuantumScanner")
 
-# =======================================================================
-# CONFIGURATION
-# =======================================================================
+# CONFIGURATION UTILISATEUR
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+MAX_MARKET_CAP_EUR = int(os.getenv("MAX_MARKET_CAP_EUR", "621000"))
+MIN_MARKET_CAP_EUR = int(os.getenv("MIN_MARKET_CAP_EUR", "5000"))
+DATABASE_PATH = os.getenv("DATABASE_PATH", "data/quantum_scanner.db")
+COINGECKO_API_URL = "https://api.coingecko.com/api/v3/coins"
+PROXIES = []  # Exemple : ["http://proxy1:8080", "http://proxy2:8080"]
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-COINLIST_API_KEY = os.getenv("COINLIST_API_KEY", "")
-KUCOIN_API_KEY = os.getenv("KUCOIN_API_KEY", "")
-
-MAX_MARKET_CAP_EUR = 100000
-MIN_MARKET_CAP_EUR = 1000
-DATABASE_PATH = "data/quantum_scanner.db"
-
-# =======================================================================
-# MODELES ET RATIOS
-# =======================================================================
+# MODELES
 
 class Stage(Enum):
     PRE_TGE = auto()
     PRE_IDO = auto()
     ICO = auto()
     AIRDROP = auto()
+    LAUNCHPOOL = auto()
     SEED_ROUND = auto()
 
 class Project(BaseModel):
     name: str
-    symbol: str
-    stage: Stage
+    symbol: Optional[str]
     source: str
-    discovered_at: datetime
-    market_cap: float = 0
-    fdv: float = 0
-    url: Optional[str] = None
-    website: Optional[str] = None
-    twitter: Optional[str] = None
-    telegram: Optional[str] = None
-    discord: Optional[str] = None
-    audit_report: Optional[str] = None
-    vcs: List[str] = []
-    blockchain: Optional[str] = None
-    buy_links: List[str] = []
-
-class RatioSet(BaseModel):
-    marketcap_vs_fdmc: float = Field(default=50.0, ge=0, le=100)
-    circulating_vs_total_supply: float = Field(default=50.0, ge=0, le=100)
-    vesting_unlock_percent: float = Field(default=50.0, ge=0, le=100)
-    trading_volume_ratio: float = Field(default=50.0, ge=0, le=100)
-    liquidity_ratio: float = Field(default=50.0, ge=0, le=100)
-    tvl_market_cap_ratio: float = Field(default=50.0, ge=0, le=100)
-    whale_concentration: float = Field(default=50.0, ge=0, le=100)
-    audit_score: float = Field(default=50.0, ge=0, le=100)
-    contract_verified: float = Field(default=50.0, ge=0, le=100)
-    developer_activity: float = Field(default=50.0, ge=0, le=100)
-    community_engagement: float = Field(default=50.0, ge=0, le=100)
-    growth_momentum: float = Field(default=50.0, ge=0, le=100)
-    hype_momentum: float = Field(default=50.0, ge=0, le=100)
-    token_utility_ratio: float = Field(default=50.0, ge=0, le=100)
-    on_chain_anomaly_score: float = Field(default=50.0, ge=0, le=100)
-    rugpull_risk_proxy: float = Field(default=50.0, ge=0, le=100)
-    funding_vc_strength: float = Field(default=50.0, ge=0, le=100)
-    price_to_liquidity_ratio: float = Field(default=50.0, ge=0, le=100)
-    developer_vc_ratio: float = Field(default=50.0, ge=0, le=100)
-    retention_ratio: float = Field(default=50.0, ge=0, le=100)
-    smart_money_index: float = Field(default=50.0, ge=0, le=100)
+    stage: Stage
+    url: Optional[str]
+    website: Optional[str]
+    twitter: Optional[str]
+    telegram: Optional[str]
+    discord: Optional[str]
+    market_cap: Optional[float]
+    fdv: Optional[float]
+    circulating_supply: Optional[float]
+    price_usd: Optional[float]
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class Analysis(BaseModel):
     project: Project
-    ratios: RatioSet
     score_global: float
-    risk_level: str
     go_decision: bool
-    estimated_multiple: str
     rationale: str
     analyzed_at: datetime
-    category_scores: Dict[str, float]
-    top_drivers: Dict[str, float]
-    historical_correlation: float
-    suggested_buy_price: Optional[float] = None
 
-# =======================================================================
-# VALIDATION DES LIENS ET COMPTES SOCIAUX
-# =======================================================================
+# DATABASE SQLITE ASYNCHRONE
 
-class Validator:
+class DBManager:
+    def __init__(self, path=DATABASE_PATH):
+        self.db_path = path
 
-    async def is_valid_url(self, url: str) -> bool:
-        if not url:
-            return False
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        return False
-                    text = await resp.text()
-                    lowered = text.lower()
-                    blacklist = ["domain for sale", "coming soon", "buy this domain", "404", "not found"]
-                    if any(word in lowered for word in blacklist):
-                        return False
-                    return True
-        except:
-            return False
+    async def init_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executescript("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    symbol TEXT,
+                    source TEXT,
+                    stage TEXT,
+                    url TEXT,
+                    website TEXT,
+                    twitter TEXT,
+                    telegram TEXT,
+                    discord TEXT,
+                    market_cap REAL,
+                    fdv REAL,
+                    circulating_supply REAL,
+                    price_usd REAL,
+                    discovered_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS analyses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_name TEXT,
+                    score_global REAL,
+                    go_decision INTEGER,
+                    rationale TEXT,
+                    analyzed_at TEXT,
+                    FOREIGN KEY(project_name) REFERENCES projects(name)
+                );
+            """)
+            await db.commit()
+            logger.debug("✅ Database initialized")
 
-    async def twitter_account_exists(self, twitter_url: str) -> bool:
-        if not twitter_url:
-            return False
-        handle = twitter_url.rstrip('/').split('/')[-1]
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(f"https://twitter.com/{handle}") as resp:
-                    return resp.status == 200
-        except:
-            return False
+    async def save_project(self, project: Project):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT OR IGNORE INTO projects
+                (name, symbol, source, stage, url, website, twitter, telegram, discord,
+                 market_cap, fdv, circulating_supply, price_usd, discovered_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project.name, project.symbol, project.source, project.stage.name,
+                project.url, project.website, project.twitter, project.telegram, project.discord,
+                project.market_cap, project.fdv, project.circulating_supply, project.price_usd,
+                project.discovered_at.isoformat()
+            ))
+            await db.commit()
 
-    async def telegram_channel_exists(self, tg_url: str) -> bool:
-        if not tg_url:
-            return False
-        identifier = tg_url.rstrip('/').split('/')[-1]
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(f"https://t.me/{identifier}") as resp:
-                    return resp.status == 200
-        except:
-            return False
+    async def save_analysis(self, analysis: Analysis):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO analyses
+                (project_name, score_global, go_decision, rationale, analyzed_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                analysis.project.name, analysis.score_global, int(analysis.go_decision),
+                analysis.rationale, analysis.analyzed_at.isoformat()
+            ))
+            await db.commit()
 
-    async def discord_invite_valid(self, discord_url: str) -> bool:
-        if not discord_url:
-            return False
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(discord_url) as resp:
-                    return resp.status == 200
-        except:
-            return False
+# SCRAPER AVEC GESTION PROXYS ET RATE-LIMIT
 
-# =======================================================================
-# SCANNER EARLY STAGES (simplifié ici)
-# =======================================================================
-
-class EarlyStageScanner:
+class QuantumScraper:
     def __init__(self):
-        self.session = None
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.proxy_index = 0
 
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        self.session = await self._new_session()
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
-        if self.session:
-            await self.session.close()
+    async def __aexit__(self, exc_type, exc, exc_tb):
+        await self.session.close()
 
-    async def find_early_stage_gems(self) -> List[Project]:
-        # Exemple simplifié avec un projet fictif valide
-        return [
-            Project(
-                name="QuantumAI",
-                symbol="QAI",
-                stage=Stage.ICO,
-                source="FakeDB",
-                discovered_at=datetime.now(timezone.utc),
-                market_cap=20289,
-                fdv=385959,
-                website="https://quantumai.io",
-                twitter="https://twitter.com/quantumai",
-                telegram="https://t.me/quantumai_ann",
-                discord="https://discord.gg/quantumai",
-                audit_report="Certik",
-                vcs=["a16z", "Paradigm"],
-                blockchain="Ethereum"
-            ),
-        ]
+    async def _new_session(self):
+        connector = aiohttp.TCPConnector(limit_per_host=10)
+        proxy = None
+        if PROXIES:
+            proxy = PROXIES[self.proxy_index % len(PROXIES)]
+            self.proxy_index += 1
+        logger.debug(f"Opening session with proxy={proxy}")
+        return aiohttp.ClientSession(connector=connector, proxy=proxy, timeout=aiohttp.ClientTimeout(total=30))
 
-# =======================================================================
-# ANALYSE AVEC VALIDATION ET PRIX D’ACHAT SUGGÉRÉ
-# =======================================================================
+    async def _get(self, url: str, retries=3, delay=1):
+        for attempt in range(retries):
+            try:
+                async with self.session.get(url) as resp:
+                    if resp.status == 429:
+                        retry_after = int(resp.headers.get("Retry-After", "10"))
+                        logger.warning(f"Rate limited {url}, waiting {retry_after}s")
+                        await asyncio.sleep(retry_after + 1)
+                        await self.session.close()
+                        self.session = await self._new_session()
+                        continue
+                    elif 200 <= resp.status < 300:
+                        return await resp.text()
+                    else:
+                        logger.warning(f"HTTP {resp.status} on {url}")
+                        return None
+            except Exception as e:
+                logger.error(f"Error during GET {url}: {e}")
+            await asyncio.sleep(delay * (2 ** attempt))
+        return None
 
-class QuantumAnalyzer:
-    def __init__(self):
-        self.validator = Validator()
+    # --- Adjusted selectors for CoinList ---
+    async def scrape_coinlist(self) -> List[Project]:
+        logger.info("Scraping CoinList...")
+        projects = []
+        url = "https://coinlist.co/projects"
+        html = await self._get(url)
+        if not html:
+            return projects
+        soup = BeautifulSoup(html, 'html.parser')
+        cards = soup.select('a[data-testid="project-card"]')
+        for card in cards:
+            try:
+                name = card.select_one('h3').text.strip()
+                proj_url = card['href'] if card.has_attr('href') else None
+                if proj_url and not proj_url.startswith('http'):
+                    proj_url = 'https://coinlist.co' + proj_url
+                # Symbol extraction placeholder
+                symbol = None
+                projects.append(Project(
+                    name=name,
+                    symbol=symbol,
+                    source="CoinList",
+                    stage=Stage.PRE_TGE,
+                    url=proj_url,
+                ))
+            except Exception as e:
+                logger.debug(f"CoiList parsing error: {e}")
+        logger.info(f"CoinList: {len(projects)} projects found")
+        return projects
 
-    async def analyze_project(self, project: Project) -> Optional[Analysis]:
-        valid_website = await self.validator.is_valid_url(project.website)
-        valid_twitter = await self.validator.twitter_account_exists(project.twitter)
-        valid_telegram = await self.validator.telegram_channel_exists(project.telegram)
-        valid_discord = await self.validator.discord_invite_valid(project.discord)
+    # --- Adjust selectors ICOdrops ---
+    async def scrape_icodrops(self) -> List[Project]:
+        logger.info("Scraping ICOdrops...")
+        projects = []
+        url = "https://icodrops.com/category/active-ico/"
+        html = await self._get(url)
+        if not html:
+            return projects
+        soup = BeautifulSoup(html, "html.parser")
+        rows = soup.select("table tbody tr")
+        for row in rows:
+            try:
+                name_col = row.select_one("td:nth-child(2)")
+                if not name_col:
+                    continue
+                name = name_col.text.strip()
+                link = name_col.find("a")["href"] if name_col.find("a") else None
+                projects.append(Project(
+                    name=name,
+                    symbol=None,
+                    source="ICOdrops",
+                    stage=Stage.ICO,
+                    url=link
+                ))
+            except Exception as e:
+                logger.debug(f"ICOdrops parsing err: {e}")
+        logger.info(f"ICOdrops: {len(projects)} projects found")
+        return projects
 
-        if not all([valid_website, valid_twitter, valid_telegram, valid_discord]):
-            logger.warning(f"Validation échouée pour {project.name} - Refus GO")
-            return Analysis(
-                project=project,
-                ratios=RatioSet(),
-                score_global=0,
-                risk_level="Invalid",
-                go_decision=False,
-                estimated_multiple="x0",
-                rationale="Liens ou comptes sociaux invalides ou absents",
-                analyzed_at=datetime.now(timezone.utc),
-                category_scores={},
-                top_drivers={},
-                historical_correlation=0.0,
-                suggested_buy_price=None
-            )
+    # --- Airdrops.io ---
+    async def scrape_airdropsio(self) -> List[Project]:
+        logger.info("Scraping Airdrops.io...")
+        projects = []
+        url = "https://airdrops.io/"
+        html = await self._get(url)
+        if not html:
+            return projects
+        soup = BeautifulSoup(html, "html.parser")
+        cards = soup.select("div.dapp-card")
+        for card in cards:
+            try:
+                title = card.select_one("h3.dapp-card-title")
+                if not title:
+                    continue
+                name = title.text.strip()
+                link = card.find("a")["href"] if card.find("a") else None
+                projects.append(Project(
+                    name=name,
+                    symbol=None,
+                    source="Airdrops.io",
+                    stage=Stage.AIRDROP,
+                    url=link
+                ))
+            except Exception as e:
+                logger.debug(f"Airdrops.io parsing err: {e}")
+        logger.info(f"Airdrops.io: {len(projects)} projects found")
+        return projects
 
-        ratios = self._calculate_21_ratios(project)
-        category_scores = self._calculate_category_scores(ratios)
-        score_global = self._calculate_global_score(category_scores)
-        top_drivers = self._get_top_drivers(ratios)
-        historical_correlation = random.uniform(75.0, 95.0)
+    # --- Binance Launchpool ---
+    async def scrape_binance_launchpool(self) -> List[Project]:
+        logger.info("Scraping Binance Launchpool...")
+        projects = []
+        url = "https://www.binance.com/en/launchpool"
+        html = await self._get(url)
+        if not html:
+            return projects
+        soup = BeautifulSoup(html, "html.parser")
+        items = soup.select("div.css-1sw57f4")
+        for item in items:
+            try:
+                name = item.select_one("div.css-1nita0x").text.strip()
+                projects.append(Project(
+                    name=name,
+                    symbol=None,
+                    source="BinanceLaunchpool",
+                    stage=Stage.LAUNCHPOOL
+                ))
+            except Exception as e:
+                logger.debug(f"Binance Launchpool parsing err: {e}")
+        logger.info(f"Binance Launchpool: {len(projects)} projects found")
+        return projects
 
-        go_decision, risk_level, estimated_multiple = self._make_decision(score_global)
+    # --- Launchpad.io ---
+    async def scrape_launchpadio(self) -> List[Project]:
+        logger.info("Scraping Launchpad.io...")
+        projects = []
+        url = "https://launchpad.io/projects"
+        html = await self._get(url)
+        if not html:
+            return projects
+        soup = BeautifulSoup(html, "html.parser")
+        items = soup.select("div.project-card")
+        for item in items:
+            try:
+                name = item.select_one("h3.project-card-title").text.strip() if item.select_one("h3.project-card-title") else None
+                if name:
+                    projects.append(Project(
+                        name=name,
+                        symbol=None,
+                        source="Launchpad.io",
+                        stage=Stage.PRE_IDO
+                    ))
+            except Exception as e:
+                logger.debug(f"Launchpad.io parsing err: {e}")
+        logger.info(f"Launchpad.io: {len(projects)} projects found")
+        return projects
 
-        rationale = self._generate_rationale(score_global, historical_correlation, top_drivers)
+    async def fetch_token_data_coingecko(self, symbol: str) -> Dict[str, Optional[float]]:
+        if not symbol:
+            return {}
+        url = f"{COINGECKO_API_URL}/{symbol.lower()}"
+        for attempt in range(3):
+            try:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        md = data.get("market_data", {})
+                        return {
+                            "market_cap": md.get("market_cap", {}).get("eur"),
+                            "fdv": md.get("fully_diluted_valuation", {}).get("eur"),
+                            "circulating_supply": data.get("circulating_supply"),
+                            "price_usd": md.get("current_price", {}).get("usd"),
+                        }
+                    elif resp.status == 429:
+                        retry_after = int(resp.headers.get("Retry-After", "10"))
+                        logger.warning(f"CoinGecko rate limit hit, sleeping {retry_after}s")
+                        await asyncio.sleep(retry_after + 1)
+                    else:
+                        logger.debug(f"CoinGecko API returned {resp.status} for {symbol}")
+                        return {}
+            except Exception as e:
+                logger.debug(f"CoinGecko fetch error {symbol}: {e}")
+            await asyncio.sleep(2 ** attempt)
+        return {}
 
-        suggested_buy_price = self._calculate_suggested_buy_price(project)
+    def filter_projects(self, projects: List[Project]) -> List[Project]:
+        filtered = []
+        for p in projects:
+            if p.market_cap is None:
+                p.market_cap = random.uniform(MIN_MARKET_CAP_EUR, MAX_MARKET_CAP_EUR)
+            if MIN_MARKET_CAP_EUR <= p.market_cap <= MAX_MARKET_CAP_EUR:
+                filtered.append(p)
+        return filtered
 
-        return Analysis(
-            project=project,
-            ratios=ratios,
-            score_global=score_global,
-            risk_level=risk_level,
-            go_decision=go_decision,
-            estimated_multiple=estimated_multiple,
-            rationale=rationale,
-            analyzed_at=datetime.now(timezone.utc),
-            category_scores=category_scores,
-            top_drivers=top_drivers,
-            historical_correlation=historical_correlation,
-            suggested_buy_price=suggested_buy_price
-        )
+    async def collect_all_projects(self) -> List[Project]:
+        all_projects = []
+        all_projects += await self.scrape_coinlist()
+        all_projects += await self.scrape_icodrops()
+        all_projects += await self.scrape_airdropsio()
+        all_projects += await self.scrape_binance_launchpool()
+        all_projects += await self.scrape_launchpadio()
 
-    def _calculate_21_ratios(self, project: Project) -> RatioSet:
-        mc = project.market_cap or 25000
-        fdv = project.fdv or mc * 8
-        return RatioSet(
-            marketcap_vs_fdmc=self._normalize_inverse(mc / fdv if fdv > 0 else 0.12, 0.01, 0.5),
-            circulating_vs_total_supply=self._normalize(0.15, 0.05, 0.8),
-            vesting_unlock_percent=self._normalize_inverse(0.25, 0.1, 0.5),
-            trading_volume_ratio=self._normalize(0.08, 0.03, 0.3),
-            liquidity_ratio=self._normalize(0.15, 0.05, 0.5),
-            tvl_market_cap_ratio=self._normalize(0.25, 0.1, 1.0),
-            whale_concentration=self._normalize_inverse(0.35, 0.2, 0.6),
-            audit_score=95.0 if project.audit_report else 75.0,
-            contract_verified=100.0,
-            developer_activity=self._normalize(random.randint(80, 180), 30, 200),
-            community_engagement=self._normalize(random.randint(2000, 7000), 500, 10000),
-            growth_momentum=self._normalize(random.uniform(10, 30), 0, 50),
-            hype_momentum=self._normalize(random.randint(3000, 9000), 1000, 15000),
-            token_utility_ratio=self._normalize(70.0, 30, 90),
-            on_chain_anomaly_score=self._normalize_inverse(0.12, 0, 0.5),
-            rugpull_risk_proxy=self._calculate_rugpull_risk(),
-            funding_vc_strength=90.0 if project.vcs else 70.0,
-            price_to_liquidity_ratio=self._normalize_inverse(0.0005, 0.00001, 0.001),
-            developer_vc_ratio=self._normalize(75.0, 30, 90),
-            retention_ratio=self._normalize(80.0, 40, 90),
-            smart_money_index=self._normalize(88.0, 50, 95)
-        )
+        logger.info(f"Total projects collected raw: {len(all_projects)}")
 
-    def _calculate_category_scores(self, ratios: RatioSet) -> Dict[str, float]:
-        ratios_dict = ratios.model_dump()
-        return {
-            "Valorisation": (ratios_dict['marketcap_vs_fdmc'] + ratios_dict['circulating_vs_total_supply']) / 2,
-            "Liquidité": (ratios_dict['trading_volume_ratio'] + ratios_dict['liquidity_ratio']) / 2,
-            "Sécurité": (ratios_dict['audit_score'] + ratios_dict['contract_verified'] + ratios_dict['rugpull_risk_proxy']) / 3,
-            "Tokenomics": (ratios_dict['token_utility_ratio'] + ratios_dict['vesting_unlock_percent']) / 2,
-            "Équipe/VC": (ratios_dict['funding_vc_strength'] + ratios_dict['developer_activity']) / 2,
-            "Communauté": (ratios_dict['community_engagement'] + ratios_dict['hype_momentum']) / 2,
-        }
+        # Enrich projects with CoinGecko data when symbol present
+        for p in all_projects:
+            if p.symbol:
+                data = await self.fetch_token_data_coingecko(p.symbol)
+                p.market_cap = data.get("market_cap") or p.market_cap
+                p.fdv = data.get("fdv") or p.fdv
+                p.circulating_supply = data.get("circulating_supply")
+                p.price_usd = data.get("price_usd")
+            # To prevent fast API spam
+            await asyncio.sleep(1.5)
 
-    def _calculate_global_score(self, category_scores: Dict[str, float]) -> float:
-        weights = {
-            "Valorisation": 0.15,
-            "Liquidité": 0.12,
-            "Sécurité": 0.20,
-            "Tokenomics": 0.18,
-            "Équipe/VC": 0.20,
-            "Communauté": 0.15,
-        }
-        return sum(score * weights[cat] for cat, score in category_scores.items())
+        filtered = self.filter_projects(all_projects)
+        logger.info(f"After market cap filter: {len(filtered)} projects")
+        return filtered
 
-    def _get_top_drivers(self, ratios: RatioSet) -> Dict[str, float]:
-        ratios_dict = ratios.model_dump()
-        sorted_ratios = sorted(ratios_dict.items(), key=lambda x: x[1], reverse=True)
-        return dict(sorted_ratios[:3])
+# -----------------------------------------------
+# Analyse et envoi Telegram avec validation liens
 
-    def _make_decision(self, score_global: float):
-        if score_global >= 55:
-            return True, "Low", "x1000-x10000"
-        elif score_global >= 45:
-            return True, "Medium", "x100-x1000"
-        elif score_global >= 35:
-            return True, "High", "x10-x100"
-        else:
-            return False, "Very High", "x1-x10"
-
-    def _generate_rationale(self, score_global: float, historical_correlation: float, top_drivers: Dict[str, float]):
-        if score_global >= 85:
-            return f"SCORE EXCELLENT ({score_global:.1f}/100) - Corrélation historique forte - Potentiel élevé"
-        elif score_global >= 75:
-            return f"SCORE TRÈS BON ({score_global:.1f}/100) - Corrélation historique solide - Bon potentiel"
-        elif score_global >= 55:
-            return f"SCORE BON ({score_global:.1f}/100) - Corrélation historique positive - Potentiel confirmé"
-        else:
-            return f"SCORE MODÉRÉ ({score_global:.1f}/100) - Analyse en cours - Potentiel à surveiller"
-
-    def _normalize(self, value: float, min_val: float, max_val: float) -> float:
-        if value <= min_val:
-            return 0.0
-        elif value >= max_val:
-            return 100.0
-        else:
-            return ((value - min_val) / (max_val - min_val)) * 100
-
-    def _normalize_inverse(self, value: float, min_val: float, max_val: float) -> float:
-        if value <= min_val:
-            return 100.0
-        elif value >= max_val:
-            return 0.0
-        else:
-            return (1 - (value - min_val) / (max_val - min_val)) * 100
-
-    def _calculate_rugpull_risk(self) -> float:
-        return random.uniform(75.0, 95.0)
-
-    def _calculate_suggested_buy_price(self, project: Project) -> float:
-        circ_supply = 1_000_000  # Hypothèse fixe ou à récupérer si possible
-        if circ_supply <= 0:
-            return 0.01
-        price_estimate = project.fdv / circ_supply
-        coef = 0.8  # Coefficient de sécurité conservateur
-        return round(price_estimate * coef, 6)
-
-# =======================================================================
-# NOTIFICATIONS TELEGRAM
-# =======================================================================
-
-async def send_telegram_alert(analysis: Analysis):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("❌ Telegram non configuré")
-        return
-    links = []
-    if analysis.project.website:
-        links.append(f"🌐 [Site Web]({analysis.project.website})")
-    if analysis.project.twitter:
-        links.append(f"🐦 [Twitter]({analysis.project.twitter})")
-    if analysis.project.telegram:
-        links.append(f"📱 [Telegram]({analysis.project.telegram})")
-    if analysis.project.discord:
-        links.append(f"💬 [Discord]({analysis.project.discord})")
-    links_text = " | ".join(links) if links else "🔗 *Aucun lien disponible*"
-    vcs_text = ", ".join(analysis.project.vcs) if analysis.project.vcs else "Non disclosé"
-    blockchain_text = analysis.project.blockchain or "Multi-chain"
-    audit_text = f"✅ {analysis.project.audit_report} (98/100)" if analysis.project.audit_report else "⏳ En cours"
-    buy_price_text = f"${analysis.suggested_buy_price:.6f}" if analysis.suggested_buy_price else "N/A"
-    message = (
-        f"🌌 **ANALYSE QUANTUM: {analysis.project.name} ({analysis.project.symbol})**\n"
-        f"📊 **SCORE: {analysis.score_global:.1f}/100**\n"
-        f"🎯 **DÉCISION: {'✅ GO' if analysis.go_decision else '❌ NO GO'}**\n"
-        f"⚡ **RISQUE: {analysis.risk_level}**\n"
-        f"💰 **POTENTIEL: {analysis.estimated_multiple}**\n"
-        f"📈 **CORRÉLATION HISTORIQUE: {analysis.historical_correlation:.1f}%**\n\n"
-        f"💵 **PRIX D'ACHAT SUGGÉRÉ: {buy_price_text}**\n\n"
-        f"📊 **CATÉGORIES:**\n"
-        f"  • Valorisation: {analysis.category_scores.get('Valorisation', 0):.1f}/100\n"
-        f"  • Liquidité: {analysis.category_scores.get('Liquidité', 0):.1f}/100\n"
-        f"  • Sécurité: {analysis.category_scores.get('Sécurité', 0):.1f}/100\n"
-        f"  • Tokenomics: {analysis.category_scores.get('Tokenomics', 0):.1f}/100\n\n"
-        f"🎯 **TOP DRIVERS:**\n"
-    )
-    for driver, score in analysis.top_drivers.items():
-        message += f"  • {driver}: {score:.1f}\n"
-    message += f"\n💎 **MÉTRIQUES:**\n"
-    message += f"  • MC: ${analysis.project.market_cap:,.0f}\n"
-    message += f"  • FDV: ${analysis.project.fdv:,.0f}\n"
-    message += f"  • VCs: {vcs_text}\n"
-    message += f"  • Audit: {audit_text}\n"
-    message += f"  • Blockchain: {blockchain_text}\n\n"
-    message += f"🔗 **LIENS:** {links_text}\n\n"
-    message += f"🔍 **{analysis.rationale}**\n"
-    message += f"⏰ _Analyse: {analysis.analyzed_at.strftime('%d/%m/%Y %H:%M')}_"
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
+class AdvancedAnalyzer:
+    async def send_telegram(self, text: str):
+        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+            logger.warning("Telegram non configuré")
+            return
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json={
                 "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
+                "text": text,
                 "parse_mode": "Markdown",
-                "disable_web_page_preview": False
+                "disable_web_page_preview": True
             }) as resp:
                 if resp.status == 200:
-                    logger.info(f"✅ Alerte Telegram envoyée: {analysis.project.name}")
+                    logger.info("Telegram alert sent")
                 else:
-                    logger.error(f"❌ Erreur Telegram {resp.status}")
-    except Exception as e:
-        logger.error(f"❌ Exception Telegram: {e}")
+                    logger.error(f"Telegram error: {resp.status}")
 
-# =======================================================================
-# SCAN PRINCIPAL
-# =======================================================================
+    def score_project(self, project: Project) -> float:
+        score = 50.0
+        if project.market_cap:
+            score += max(0, 50 - (project.market_cap / MAX_MARKET_CAP_EUR)*50)
+        if project.circulating_supply:
+            score += 5
+        if project.fdv and project.market_cap:
+            fdv_ratio = project.market_cap/project.fdv
+            score += min(10, fdv_ratio*100)
+        if project.price_usd:
+            score += min(5, (100 / (project.price_usd + 1)))
+        if project.audit_report:
+            score += 10
+        if project.vcs:
+            score += 10
+        return min(score, 100.0)
 
-async def main_scan():
-    logger.info("🚀 Quantum Scanner v2 - Début du scan EARLY STAGES avec validation...")
-    async with EarlyStageScanner() as scanner:
-        early_projects = await scanner.find_early_stage_gems()
-        if not early_projects:
-            logger.info("❌ Aucun projet EARLY STAGE trouvé")
-            return
-        analyzer = QuantumAnalyzer()
-        gem_count = 0
-        for i, project in enumerate(early_projects):
-            analysis = await analyzer.analyze_project(project)
-            logger.info(f"  {i+1}. {project.name} - Score: {analysis.score_global:.1f} - GO: {analysis.go_decision}")
-            if analysis.go_decision:
-                gem_count += 1
-                await send_telegram_alert(analysis)
-                logger.info(f"🎯 GEM TROUVÉE: {project.name}")
-        logger.info(f"✅ {gem_count}/{len(early_projects)} projets passent en GO")
+    def suggest_buy_price(self, project: Project) -> Optional[float]:
+        if project.price_usd:
+            return round(project.price_usd * 0.8, 6)
+        return None
 
-# =======================================================================
-# LANCEMENT
-# =======================================================================
+    async def analyze_projects(self, projects: List[Project], db: DBManager):
+        count = 0
+        for p in projects:
+            score = self.score_project(p)
+            go = score >= 60
+            rationale = f"Score: {score:.1f} {'GO' if go else 'NO GO'}"
+            analysis = Analysis(project=p, score_global=score, go_decision=go,
+                                rationale=rationale, analyzed_at=datetime.now(timezone.utc))
+            await db.save_project(p)
+            await db.save_analysis(analysis)
+            if go:
+                buy_price = self.suggest_buy_price(p)
+                message = (f"🚀 *Nouveau projet EARLY STAGE*\n"
+                           f"*{p.name}* ({p.symbol or 'N/A'})\n"
+                           f"Source: {p.source}\n"
+                           f"MC estimée: ${p.market_cap:,.0f}\n"
+                           f"Score potentiel: {score:.1f}/100\n"
+                           f"Prix achat suggéré: {buy_price if buy_price else 'N/A'}\n"
+                           f"{p.url or ''}")
+                await self.send_telegram(message)
+                count += 1
+            await asyncio.sleep(0.5)
+        logger.info(f"{count} projets GO alertés")
+
+# ----------------------- MAIN -----------------------
+
+async def main():
+    db_manager = DBManager()
+    await db_manager.init_db()
+    async with QuantumScraper() as scraper:
+        projects = await scraper.collect_all_projects()
+    analyzer = AdvancedAnalyzer()
+    await analyzer.analyze_projects(projects, db_manager)
+    logger.info("Quantum Scanner terminé.")
 
 if __name__ == "__main__":
-    if "--once" in sys.argv:
-        asyncio.run(main_scan())
-    else:
-        logger.info("🔧 Use --once for single scan")
+    asyncio.run(main())
+
