@@ -49,10 +49,22 @@ jobs:
           echo "SCAN_INTERVAL_HOURS=6" >> .env
       - name: Create data directory
         run: mkdir -p data
+      - name: 🔍 TEST Telegram
+        run: |
+          python -c "
+import os
+from telegram import Bot
+import asyncio
+
+async def send_test_message():
+    bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
+    await bot.send_message(chat_id=os.getenv('TELEGRAM_CHAT_ID'), text='✅ Test GitHub Actions -> Telegram')
+
+asyncio.run(send_test_message())
+print('TEST Telegram envoyé')
+          "
       - name: Run Quantum Scanner
         run: |
-          # S’assure que le script charge .env dans ton code (load_dotenv()), 
-          # puis exécute le
           python quantum_scanner.py --once
       - name: Upload DB artifact
         uses: actions/upload-artifact@v4
