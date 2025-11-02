@@ -1,0 +1,58 @@
+name: 🚀 Quantum Scanner 24/7
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Toutes les 6 heures
+  workflow_dispatch:        # Lancement manuel
+
+jobs:
+  scan-crypto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: 📦 Install dependencies
+      run: pip install aiohttp requests python-dotenv pandas numpy websockets beautifulsoup4 schedule
+      
+    - name: 🔐 Load API secrets
+      run: |
+        echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
+        echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
+        echo "COINLIST_API_KEY=${{ secrets.COINLIST_API_KEY }}" >> .env
+        echo "KUCOIN_API_KEY=${{ secrets.KUCOIN_API_KEY }}" >> .env
+        echo "KUCOIN_SECRET=${{ secrets.KUCOIN_SECRET }}" >> .env
+        echo "KUCOIN_PASSPHRASE=${{ secrets.KUCOIN_PASSPHRASE }}" >> .env
+        
+    - name: 🗃️ Setup database
+      run: |
+        mkdir -p data
+        python -c "
+        import sqlite3
+        conn = sqlite3.connect('data/quantum_scanner.db')
+        conn.close()
+        print('✅ Database ready')
+        "
+        
+    - name: 🔍 Run Quantum Scanner
+      run: python quantum_scanner.py --once
+      
+    - name: 💾 Save results
+      uses: actions/upload-artifact@v4
+      with:
+        name: scan-results
+        path: data/quantum_scanner.db
+        retention-days: 30
+        
+    - name: 📊 Generate report
+      run: |
+        echo '🌌 QUANTUM SCAN COMPLETED'
+        echo '⏰ $(date)'
+        echo '📁 Database saved as artifact'
