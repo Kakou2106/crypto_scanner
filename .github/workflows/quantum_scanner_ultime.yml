@@ -27,6 +27,11 @@ jobs:
         pip install -r requirements.txt
         pip list | grep aiosqlite
 
+    - name: "⚙️ Install Playwright browsers"
+      run: |
+        pip install playwright
+        playwright install
+
     - name: "🔐 Load API secrets and config"
       run: |
         echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
