@@ -1,26 +1,95 @@
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# ============================================================================
+# QUANTUM SCANNER - GIT IGNORE
+# ============================================================================
+
+# Environment variables (CRITIQUE - contient secrets)
+.env
+.env.local
+.env.*.local
+
+# Database (contient données sensibles)
+*.db
+*.sqlite
+*.sqlite3
+data/
+backups/
 
 # Logs
-logs/
-quantum_scanner.log
 *.log
+logs/
+*.log.*
 
-# Base de données SQLite
-data/*.db
-*.sqlite
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Environnements / clés
-.env
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
 
-# Docker
-*.pid
-
-# IDE / système
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# OS
 Thumbs.db
+.DS_Store
+desktop.ini
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Config backups
+config.yml.backup
+.env.backup
