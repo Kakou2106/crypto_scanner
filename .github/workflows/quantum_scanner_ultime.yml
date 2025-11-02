@@ -1,0 +1,51 @@
+name: "🚀 Quantum Scanner 24/7"
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Toutes les 6 heures
+  workflow_dispatch:        # Lancement manuel
+  push:
+    branches: [ main ]
+
+jobs:
+  scan-crypto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: "📥 Checkout code"
+      uses: actions/checkout@v4
+      
+    - name: "🐍 Setup Python"
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: "📦 Install dependencies"
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip list | grep aiosqlite
+        
+    - name: "🔐 Load API secrets"
+      run: |
+        echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
+        echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
+        echo "COINLIST_API_KEY=${{ secrets.COINLIST_API_KEY }}" >> .env
+        echo "LUNARCRUSH_API_KEY=${{ secrets.LUNARCRUSH_API_KEY }}" >> .env
+        echo "MAX_MARKET_CAP_EUR=621000" >> .env
+        echo "SCAN_INTERVAL_HOURS=6" >> .env
+        echo "PYTHONUNBUFFERED=1" >> .env
+        
+    - name: "📁 Create data directory"
+      run: mkdir -p data
+        
+    - name: "🔍 Run Quantum Scanner"
+      run: python quantum_scanner.py --once
+      
+    - name: "💾 Save results"
+      uses: actions/upload-artifact@v4
+      with:
+        name: scan-results
+        path: data/
+        retention-days: 30
