@@ -696,7 +696,12 @@ async def initialize_sample_projects():
             website="https://berachain.com",
             twitter="@berachain"
         ),
-        Project(
+    Project(
             name="Zircuit",
             symbol="ZRC",
-            source
+            source="coingecko"
+        ),
+]
+
+if __name__ == "__main__":
+    asyncio.run(main())
