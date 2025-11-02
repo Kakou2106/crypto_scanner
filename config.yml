@@ -1,0 +1,21 @@
+scanner:
+  interval: 300
+  exchanges: ["binance", "kucoin", "coinlist", "lunarcrush", "dune", "github", "discord"]
+  
+telegram:
+  enabled: true
+  timeout: 30
+  bot_token: ""        # optionnel si tu veux charger via fichier config
+  chat_id: ""
+
+trading:
+  min_volume: 100000
+  min_volatility: 2.0
+  
+alerts:
+  price_change_threshold: 5.0
+  volume_spike_threshold: 3.0
+  go_score_threshold: 65
+
+logging:
+  level: "INFO"
