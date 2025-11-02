@@ -17,6 +17,8 @@ beautifulsoup4==4.12.2
 lxml==5.0.0
 
 # Web framework (optional - pour API/dashboard)
+fastapi==0.95.2
+uvicorn==0.22.0
 flask==3.0.0
 
 # Crypto libraries (optional)

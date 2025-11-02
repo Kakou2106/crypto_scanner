@@ -2,8 +2,8 @@ name: Quantum Scanner 24/7
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Toutes les 6 heures
-  workflow_dispatch:
+    - cron: '0 */6 * * *'  # toutes les 6 heures
+  workflow_dispatch:        # possibilité de lancer manuellement
   push:
     branches: [main]
 
@@ -28,13 +28,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: '3.11'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip list | grep aiosqlite
-      - name: Generate .env
+      - name: Generate .env file
         run: |
           echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" > .env
           echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" >> .env
@@ -49,8 +49,11 @@ jobs:
           echo "SCAN_INTERVAL_HOURS=6" >> .env
       - name: Create data directory
         run: mkdir -p data
-      - name: Run Quantum Scanner once
-        run: python quantum_scanner.py --once
+      - name: Run Quantum Scanner
+        run: |
+          # S’assure que le script charge .env dans ton code (load_dotenv()), 
+          # puis exécute le
+          python quantum_scanner.py --once
       - name: Upload DB artifact
         uses: actions/upload-artifact@v4
         with:
