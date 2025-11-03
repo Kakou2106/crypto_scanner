@@ -1,40 +1,606 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🎯 QUANTUM SCANNER ULTIME - AVEC SOURCES DES TOKENS
-Scanner PRE-TGE avec sources détaillées
+🔥 QUANTUM SCANNER - Système Anti-Scam 24/7
+Correction de l'erreur SyntaxError: 'return' outside function
 """
 
 import asyncio
 import aiohttp
-import aiosqlite
+import sqlite3
+import numpy as np
+from datetime import datetime, timedelta
 import logging
-from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
-from enum import Enum, auto
-import os
-import random
-import json
-from dotenv import load_dotenv
+import re
+import hashlib
+from urllib.parse import urlparse
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import argparse
+import sys
 
-load_dotenv()
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("QuantumScanner")
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-MAX_MARKET_CAP_EUR = 621000
-DATABASE_PATH = "data/quantum_scanner.db"
+@dataclass
+class ScannerConfig:
+    """Configuration du scanner"""
+    
+    # API Keys
+    COINGECKO_API: str = "https://api.coingecko.com/api/v3"
+    DEXSCREENER_API: str = "https://api.dexscreener.com/latest/dex"
+    
+    # Critères
+    MAX_MARKET_CAP: int = 500000
+    MIN_LIQUIDITY: int = 50000
+    
+    # Timeouts
+    REQUEST_TIMEOUT: int = 30
+    MAX_CONCURRENT: int = 10
+
+CONFIG = ScannerConfig()
 
 # ============================================================================
-# MODÈLES AMÉLIORÉS
+# STRUCTURES DE DONNÉES
 # ============================================================================
 
+class RiskLevel(str, Enum):
+    CRITICAL = "🚨 CRITIQUE"
+    HIGH = "⚠️ ÉLEVÉ"
+    MEDIUM = "⚡ MOYEN"
+    LOW = "🔍 FAIBLE"
+    SAFE = "✅ SÛR"
+
+@dataclass
+class ProjectData:
+    """Données du projet"""
+    name: str
+    symbol: str
+    contract_address: str = ""
+    website: str = ""
+    twitter: str = ""
+    telegram: str = ""
+    discord: str = ""
+    market_cap: float = 0
+    liquidity: float = 0
+    price: float = 0
+    volume_24h: float = 0
+    source: str = ""
+
+@dataclass
+class AnalysisResult:
+    """Résultat de l'analyse"""
+    project: ProjectData
+    risk_level: RiskLevel
+    score: float
+    confidence: float
+    warnings: List[str]
+    recommendations: List[str]
+    sources: List[str]
+
+# ============================================================================
+# MOTEUR D'ANALYSE CORRIGÉ
+# ============================================================================
+
+class QuantumAnalysisEngine:
+    """Moteur d'analyse quantique corrigé"""
+    
+    def __init__(self):
+        self.session = None
+        self.cache = {}
+    
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=CONFIG.REQUEST_TIMEOUT)
+        )
+        return self
+    
+    async def __aexit__(self, *args):
+        if self.session:
+            await self.session.close()
+    
+    def calculate_correlation(self, project: ProjectData) -> float:
+        """Calcule la corrélation avec des projets légitimes - CORRIGÉ"""
+        try:
+            # Facteurs de corrélation
+            factors = []
+            
+            # Market Cap ratio
+            if project.market_cap > 0 and project.liquidity > 0:
+                mc_ratio = project.liquidity / project.market_cap
+                if 0.1 <= mc_ratio <= 0.8:
+                    factors.append(0.8)
+                else:
+                    factors.append(0.3)
+            
+            # Volume santé
+            if project.market_cap > 0:
+                volume_ratio = project.volume_24h / project.market_cap
+                if 0.01 <= volume_ratio <= 0.5:
+                    factors.append(0.7)
+                else:
+                    factors.append(0.4)
+            
+            # Présence sociale
+            social_factors = []
+            if project.website:
+                social_factors.append(0.6)
+            if project.twitter:
+                social_factors.append(0.7)
+            if project.telegram:
+                social_factors.append(0.5)
+            if project.discord:
+                social_factors.append(0.4)
+            
+            if social_factors:
+                factors.append(sum(social_factors) / len(social_factors))
+            
+            # Calcul final
+            if factors:
+                base_correlation = (sum(factors) / len(factors)) * 100
+                return min(base_correlation, 95.0)  # ✅ CORRECTION: return à l'intérieur de la fonction
+            else:
+                return 50.0
+                
+        except Exception as e:
+            logger.error(f"Erreur calcul corrélation: {e}")
+            return 30.0
+    
+    async def analyze_project(self, project: ProjectData) -> AnalysisResult:
+        """Analyse un projet complet"""
+        
+        warnings = []
+        score = 0
+        confidence = 0
+        
+        try:
+            # 🎯 ANALYSE MARKET CAP
+            if project.market_cap > CONFIG.MAX_MARKET_CAP:
+                warnings.append(f"Market cap trop élevé: ${project.market_cap:,.0f}")
+                score -= 20
+            
+            # 🎯 ANALYSE LIQUIDITÉ
+            if project.liquidity < CONFIG.MIN_LIQUIDITY:
+                warnings.append(f"Liquidité insuffisante: ${project.liquidity:,.0f}")
+                score -= 25
+            else:
+                score += 15
+            
+            # 🎯 VÉRIFICATION LIENS SOCIAUX
+            social_score = await self.verify_social_links(project)
+            score += social_score
+            
+            if social_score < 30:
+                warnings.append("Liens sociaux manquants ou invalides")
+            
+            # 🎯 CALCUL CORRÉLATION
+            correlation = self.calculate_correlation(project)
+            confidence = correlation
+            
+            # 🎯 SCORE FINAL
+            base_score = 50  # Score de base
+            final_score = max(0, min(100, base_score + score))
+            
+            # 🎯 NIVEAU DE RISQUE
+            risk_level = self.determine_risk_level(final_score, warnings)
+            
+            # 🎯 RECOMMANDATIONS
+            recommendations = self.generate_recommendations(final_score, warnings, project)
+            
+            return AnalysisResult(
+                project=project,
+                risk_level=risk_level,
+                score=final_score,
+                confidence=confidence,
+                warnings=warnings,
+                recommendations=recommendations,
+                sources=[project.source]
+            )
+            
+        except Exception as e:
+            logger.error(f"Erreur analyse projet {project.name}: {e}")
+            return AnalysisResult(
+                project=project,
+                risk_level=RiskLevel.CRITICAL,
+                score=0,
+                confidence=0,
+                warnings=[f"Erreur analyse: {str(e)}"],
+                recommendations=["Analyse manuelle requise"],
+                sources=[project.source]
+            )
+    
+    async def verify_social_links(self, project: ProjectData) -> float:
+        """Vérifie les liens sociaux"""
+        score = 0
+        
+        try:
+            if project.website:
+                if await self.verify_website(project.website):
+                    score += 20
+            
+            if project.twitter:
+                if await self.verify_twitter(project.twitter):
+                    score += 15
+            
+            if project.telegram:
+                if await self.verify_telegram(project.telegram):
+                    score += 10
+            
+            if project.discord:
+                if await self.verify_discord(project.discord):
+                    score += 5
+                    
+        except Exception as e:
+            logger.error(f"Erreur vérification liens sociaux: {e}")
+        
+        return score
+    
+    async def verify_website(self, url: str) -> bool:
+        """Vérifie un site web"""
+        try:
+            async with self.session.get(url) as response:
+                return response.status == 200
+        except:
+            return False
+    
+    async def verify_twitter(self, url: str) -> bool:
+        """Vérifie un compte Twitter"""
+        try:
+            # Vérification basique de l'URL
+            if not re.match(r'https?://(twitter\.com|x\.com)/[A-Za-z0-9_]+', url):
+                return False
+            
+            async with self.session.get(url) as response:
+                return response.status == 200
+        except:
+            return False
+    
+    async def verify_telegram(self, url: str) -> bool:
+        """Vérifie un groupe Telegram"""
+        try:
+            if not url.startswith('https://t.me/'):
+                return False
+            
+            async with self.session.get(url) as response:
+                return response.status == 200
+        except:
+            return False
+    
+    async def verify_discord(self, url: str) -> bool:
+        """Vérifie un serveur Discord"""
+        try:
+            if not url.startswith(('https://discord.gg/', 'https://discord.com/invite/')):
+                return False
+            
+            async with self.session.get(url) as response:
+                return response.status == 200
+        except:
+            return False
+    
+    def determine_risk_level(self, score: float, warnings: List[str]) -> RiskLevel:
+        """Détermine le niveau de risque"""
+        if score >= 80 and not warnings:
+            return RiskLevel.SAFE
+        elif score >= 60:
+            return RiskLevel.LOW
+        elif score >= 40:
+            return RiskLevel.MEDIUM
+        elif score >= 20:
+            return RiskLevel.HIGH
+        else:
+            return RiskLevel.CRITICAL
+    
+    def generate_recommendations(self, score: float, warnings: List[str], project: ProjectData) -> List[str]:
+        """Génère des recommandations"""
+        recommendations = []
+        
+        if score >= 80:
+            recommendations.append("✅ Projet prometteur - Surveillance standard")
+        elif score >= 60:
+            recommendations.append("⚠️ Vérification manuelle recommandée")
+        elif score >= 40:
+            recommendations.append("🚨 Analyse approfondie requise")
+        else:
+            recommendations.append("❌ Éviter - Risques élevés")
+        
+        if project.liquidity < CONFIG.MIN_LIQUIDITY:
+            recommendations.append("💧 Liquidité insuffisante")
+        
+        if not project.website and not project.twitter:
+            recommendations.append("🔍 Manque de présence en ligne")
+        
+        return recommendations
+
+# ============================================================================
+# COLLECTEUR DE DONNÉES
+# ============================================================================
+
+class DataCollector:
+    """Collecte les données des projets"""
+    
+    def __init__(self):
+        self.engine = QuantumAnalysisEngine()
+    
+    async def collect_trending_projects(self) -> List[ProjectData]:
+        """Collecte les projets tendance"""
+        
+        projects = []
+        
+        try:
+            # 📊 DexScreener Trending
+            dex_projects = await self.collect_dexscreener_trending()
+            projects.extend(dex_projects)
+            
+            # 📊 CoinGecko New
+            gecko_projects = await self.collect_coingecko_new()
+            projects.extend(gecko_projects)
+            
+        except Exception as e:
+            logger.error(f"Erreur collecte données: {e}")
+        
+        return projects[:15]  # Limiter pour les tests
+    
+    async def collect_dexscreener_trending(self) -> List[ProjectData]:
+        """Collecte depuis DexScreener"""
+        projects = []
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{CONFIG.DEXSCREENER_API}/search/?q=trending"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        for pair in data.get('pairs', [])[:10]:
+                            try:
+                                project = ProjectData(
+                                    name=pair.get('baseToken', {}).get('name', 'Unknown'),
+                                    symbol=pair.get('baseToken', {}).get('symbol', 'UNKNOWN'),
+                                    contract_address=pair.get('baseToken', {}).get('address', ''),
+                                    market_cap=pair.get('fdv', 0),
+                                    liquidity=pair.get('liquidity', {}).get('usd', 0),
+                                    price=pair.get('priceUsd', 0),
+                                    volume_24h=pair.get('volume', {}).get('h24', 0),
+                                    source='DexScreener'
+                                )
+                                
+                                # Filtrer par market cap
+                                if project.market_cap <= CONFIG.MAX_MARKET_CAP:
+                                    projects.append(project)
+                                    
+                            except Exception as e:
+                                logger.error(f"Erreur formatage projet DexScreener: {e}")
+                                continue
+                                
+        except Exception as e:
+            logger.error(f"Erreur API DexScreener: {e}")
+        
+        return projects
+    
+    async def collect_coingecko_new(self) -> List[ProjectData]:
+        """Collecte depuis CoinGecko"""
+        projects = []
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{CONFIG.COINGECKO_API}/coins/markets"
+                params = {
+                    'vs_currency': 'usd',
+                    'order': 'market_cap_desc',
+                    'per_page': 10,
+                    'page': 1,
+                    'sparkline': 'false'
+                }
+                
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        for coin in data:
+                            try:
+                                project = ProjectData(
+                                    name=coin.get('name', 'Unknown'),
+                                    symbol=coin.get('symbol', '').upper(),
+                                    market_cap=coin.get('market_cap', 0),
+                                    price=coin.get('current_price', 0),
+                                    volume_24h=coin.get('total_volume', 0),
+                                    source='CoinGecko'
+                                )
+                                
+                                # Filtrer par market cap
+                                if project.market_cap <= CONFIG.MAX_MARKET_CAP:
+                                    projects.append(project)
+                                    
+                            except Exception as e:
+                                logger.error(f"Erreur formatage projet CoinGecko: {e}")
+                                continue
+                                
+        except Exception as e:
+            logger.error(f"Erreur API CoinGecko: {e}")
+        
+        return projects
+
+# ============================================================================
+# SCANNER PRINCIPAL
+# ============================================================================
+
+class QuantumScanner:
+    """Scanner quantique principal"""
+    
+    def __init__(self):
+        self.collector = DataCollector()
+        self.results = []
+    
+    async def run_scan(self, once: bool = False):
+        """Exécute le scan"""
+        
+        print("🔥 QUANTUM SCANNER - SYSTÈME ANTI-SCAM 24/7")
+        print("🎯 Scan des projets crypto en temps réel")
+        print("🛡️ Protection contre les scams et projets frauduleux")
+        print("=" * 70)
+        
+        try:
+            # 📥 COLLECTE DES DONNÉES
+            print("\n📡 Collecte des projets en cours...")
+            projects = await self.collector.collect_trending_projects()
+            
+            if not projects:
+                print("❌ Aucun projet collecté")
+                return
+            
+            print(f"✅ {len(projects)} projets collectés")
+            
+            # 🔍 ANALYSE DES PROJETS
+            print("\n🔍 Analyse des projets...")
+            
+            async with QuantumAnalysisEngine() as engine:
+                tasks = [engine.analyze_project(project) for project in projects]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 📊 FILTRAGE DES RÉSULTATS
+            valid_results = []
+            for result in results:
+                if isinstance(result, AnalysisResult):
+                    valid_results.append(result)
+                elif isinstance(result, Exception):
+                    logger.error(f"Erreur pendant l'analyse: {result}")
+            
+            self.results = valid_results
+            
+            # 📋 AFFICHAGE DES RÉSULTATS
+            self.display_results(valid_results)
+            
+            # 💾 SAUVEGARDE (optionnel)
+            if valid_results:
+                self.save_results(valid_results)
+            
+            print(f"\n🎉 SCAN TERMINÉ: {len(valid_results)} projets analysés")
+            
+            if not once:
+                print("\n🔄 Prochain scan dans 5 minutes...")
+                await asyncio.sleep(300)  # 5 minutes
+                await self.run_scan(False)
+                
+        except Exception as e:
+            logger.error(f"Erreur scan principal: {e}")
+            if not once:
+                print("\n🔄 Nouvelle tentative dans 1 minute...")
+                await asyncio.sleep(60)
+                await self.run_scan(False)
+    
+    def display_results(self, results: List[AnalysisResult]):
+        """Affiche les résultats"""
+        
+        print(f"\n{'='*80}")
+        print("📊 RÉSULTATS DU SCAN QUANTUM")
+        print(f"{'='*80}")
+        
+        for result in sorted(results, key=lambda x: x.score, reverse=True):
+            project = result.project
+            
+            print(f"\n🌌 {project.name} ({project.symbol})")
+            print(f"📊 Score: {result.score:.1f}/100 | Confiance: {result.confidence:.1f}%")
+            print(f"⚡ Risque: {result.risk_level}")
+            print(f"💰 MC: ${project.market_cap:,.0f} | Liquidité: ${project.liquidity:,.0f}")
+            print(f"🔗 Source: {project.source}")
+            
+            if result.warnings:
+                print(f"🚨 Alertes: {', '.join(result.warnings[:2])}")
+            
+            if result.recommendations:
+                print(f"💡 Recommandation: {result.recommendations[0]}")
+    
+    def save_results(self, results: List[AnalysisResult]):
+        """Sauvegarde les résultats en base de données"""
+        try:
+            conn = sqlite3.connect('quantum_scanner.db')
+            cursor = conn.cursor()
+            
+            # Création de la table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scan_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    name TEXT,
+                    symbol TEXT,
+                    score REAL,
+                    risk_level TEXT,
+                    market_cap REAL,
+                    liquidity REAL,
+                    source TEXT,
+                    warnings TEXT,
+                    recommendations TEXT
+                )
+            ''')
+            
+            # Insertion des données
+            for result in results:
+                cursor.execute('''
+                    INSERT INTO scan_results 
+                    (name, symbol, score, risk_level, market_cap, liquidity, source, warnings, recommendations)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    result.project.name,
+                    result.project.symbol,
+                    result.score,
+                    str(result.risk_level),
+                    result.project.market_cap,
+                    result.project.liquidity,
+                    result.project.source,
+                    json.dumps(result.warnings),
+                    json.dumps(result.recommendations)
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"💾 Résultats sauvegardés: {len(results)} projets")
+            
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde BD: {e}")
+
+# ============================================================================
+# POINT D'ENTRÉE CORRIGÉ
+# ============================================================================
+
+async def main():
+    """Fonction principale corrigée"""
+    
+    parser = argparse.ArgumentParser(description='Quantum Scanner - Système Anti-Scam')
+    parser.add_argument('--once', action='store_true', help='Exécuter un seul scan')
+    
+    args = parser.parse_args()
+    
+    scanner = QuantumScanner()
+    
+    try:
+        await scanner.run_scan(once=args.once)
+    except KeyboardInterrupt:
+        print("\n🛑 Scanner arrêté par l'utilisateur")
+    except Exception as e:
+        print(f"❌ Erreur critique: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    # Vérification de la syntaxe avant exécution
+    try:
+        compile(open(__file__).read(), __file__, 'exec')
+        print("✅ Syntaxe Python valide - Lancement du scanner...")
+        asyncio.run(main())
+    except SyntaxError as e:
+        print(f"❌ Erreur de syntaxe: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Erreur: {e}")
+        sys.exit(1)
 class Stage(Enum):
     PRE_TGE = auto()
     PRE_IDO = auto()
