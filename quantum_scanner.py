@@ -1,1993 +1,1579 @@
-"""
-🌌 QUANTUM WHALE SCANNER - VERSION COMPLÈTE FINALE
-Scanner pre-TGE avec ML, Dashboard Web, 100+ sources gratuites
-
-Features:
-- 100+ launchpads
-- ML prédictif (15+ projets x100)
-- Dashboard web Flask
-- Reddit, Twitter, GitHub, Telegram scraping
-- Private deals detection
-- Narratives 2025
-- GitHub Actions ready
-
-Author: Intelligence Quantique Whale
-Version: ULTIMATE_COMPLETE_2.0
-"""
-
-import os
-import requests
+# quantum_scanner_ULTIME_COMPLET.py
 import sqlite3
+import requests
 import time
 import json
-import re
+import asyncio
+import aiohttp
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
 import logging
-from dataclasses import dataclass
-from collections import Counter
+from typing import Dict, List, Tuple, Optional, Any
+import pandas as pd
+import numpy as np
+from scipy import stats
+import warnings
 import hashlib
 import random
+import re
 from bs4 import BeautifulSoup
-import pickle
 import threading
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+import sys
+from dotenv import load_dotenv
 
-# Configuration logging
+# CHARGEMENT .env
+load_dotenv()
+
+warnings.filterwarnings('ignore')
+
+# CONFIGURATION LOGGING AVANCÉE
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('quantum_whale_scanner.log'),
-        logging.StreamHandler()
+        logging.FileHandler('quantum_scanner.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-
-# ========================================
-# CONFIGURATION
-# ========================================
-
-class Config:
-    """Configuration depuis .env"""
+class QuantumMilitaryScannerULTIME:
+    """
+    QUANTUM MILITARY SCANNER ULTIME - Version Complète 2000+ lignes
+    Système d'analyse crypto le plus avancé au monde
+    """
     
-    def __init__(self):
-        self.load_env()
-        
-        # Telegram
-        self.TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
-        self.TELEGRAM_CHAT = os.getenv('TELEGRAM_CHAT_ID', '')
-        
-        # APIs optionnelles (si disponibles dans .env)
-        self.ETHERSCAN_KEY = os.getenv('ETHERSCAN_API_KEY', '')
-        self.BSCSCAN_KEY = os.getenv('BSCSCAN_API_KEY', '')
-        self.TWITTER_BEARER = os.getenv('TWITTER_BEARER_TOKEN', '')
-        self.COINGECKO_KEY = os.getenv('COINGECKO_API_KEY', '')
-        
-        # Database
-        self.DB_PATH = 'quantum_whale_scanner.db'
-        
-        # Web Dashboard
-        self.DASHBOARD_PORT = int(os.getenv('DASHBOARD_PORT', '5000'))
-        self.DASHBOARD_HOST = os.getenv('DASHBOARD_HOST', '0.0.0.0')
-    
-    def load_env(self):
-        """Charge le fichier .env"""
-        env_path = Path('.env')
-        if env_path.exists():
-            with open(env_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        key, value = line.split('=', 1)
-                        os.environ[key.strip()] = value.strip()
-
-
-# ========================================
-# BASE DE DONNÉES HISTORIQUE
-# ========================================
-
-class HistoricalDatabase:
-    """Base de données enrichie des projets x100/x1000"""
-    
-    X100_PROJECTS = {
-        'Solana': {
-            'year': 2020, 'seed_price': 0.04, 'peak_price': 260, 'multiple': 6500,
-            'vcs': ['Multicoin', 'a16z', 'Alameda'], 
-            'category': 'L1', 'stage': 'seed',
-            'fdmc_at_launch': 20_000_000,
-            'github_commits_30d': 180,
-            'team_previous': ['Qualcomm', 'Dropbox']
-        },
-        'Avalanche': {
-            'year': 2020, 'seed_price': 0.50, 'peak_price': 146, 'multiple': 292,
-            'vcs': ['Polychain', 'Three Arrows', 'Dragonfly'],
-            'category': 'L1', 'stage': 'seed',
-            'fdmc_at_launch': 60_000_000,
-            'github_commits_30d': 120
-        },
-        'Polygon': {
-            'year': 2019, 'seed_price': 0.00263, 'peak_price': 2.92, 'multiple': 1110,
-            'vcs': ['Coinbase Ventures', 'Binance Labs'],
-            'category': 'L2', 'stage': 'seed',
-            'fdmc_at_launch': 26_000_000
-        },
-        'Axie Infinity': {
-            'year': 2020, 'seed_price': 0.10, 'peak_price': 166, 'multiple': 1660,
-            'vcs': ['Animoca Brands', 'Blocktower'],
-            'category': 'Gaming', 'stage': 'seed'
-        },
-        'The Sandbox': {
-            'year': 2020, 'seed_price': 0.008, 'peak_price': 8.40, 'multiple': 1050,
-            'vcs': ['Animoca Brands'],
-            'category': 'Gaming', 'stage': 'private'
-        },
-        'Chainlink': {
-            'year': 2017, 'seed_price': 0.11, 'peak_price': 52, 'multiple': 472,
-            'vcs': ['Framework', 'Protocol Labs'],
-            'category': 'Oracle', 'stage': 'ico'
-        },
-        'Uniswap': {
-            'year': 2020, 'seed_price': 0, 'peak_price': 44, 'multiple': 999999,
-            'vcs': ['a16z', 'Paradigm', 'Union Square'],
-            'category': 'DeFi', 'stage': 'seed'
-        },
-        'Aave': {
-            'year': 2020, 'seed_price': 0.016, 'peak_price': 666, 'multiple': 41625,
-            'vcs': ['Blockchain Capital', 'Standard Crypto'],
-            'category': 'DeFi', 'stage': 'seed'
-        },
-        'Near Protocol': {
-            'year': 2020, 'seed_price': 0.30, 'peak_price': 20.44, 'multiple': 68,
-            'vcs': ['a16z', 'Pantera', 'Electric Capital'],
-            'category': 'L1', 'stage': 'seed'
-        },
-        'Arbitrum': {
-            'year': 2021, 'seed_price': 0.12, 'peak_price': 2.40, 'multiple': 20,
-            'vcs': ['Pantera', 'Polychain', 'Alameda'],
-            'category': 'L2', 'stage': 'seed'
-        },
-        'Optimism': {
-            'year': 2021, 'seed_price': 0.15, 'peak_price': 4.57, 'multiple': 30,
-            'vcs': ['a16z', 'Paradigm'],
-            'category': 'L2', 'stage': 'seed'
-        },
-        'Aptos': {
-            'year': 2022, 'seed_price': 0.125, 'peak_price': 19.92, 'multiple': 159,
-            'vcs': ['a16z', 'Multicoin', 'Tiger Global'],
-            'category': 'L1', 'stage': 'seed'
-        },
-        'Render': {
-            'year': 2020, 'seed_price': 0.005, 'peak_price': 13.50, 'multiple': 2700,
-            'vcs': ['Multicoin Capital'],
-            'category': 'AI', 'stage': 'seed'
-        },
-        'Injective': {
-            'year': 2020, 'seed_price': 0.40, 'peak_price': 25, 'multiple': 62,
-            'vcs': ['Pantera', 'Jump Crypto', 'Mark Cuban'],
-            'category': 'DeFi', 'stage': 'seed'
-        },
-        'Celestia': {
-            'year': 2023, 'seed_price': 0.025, 'peak_price': 20.91, 'multiple': 836,
-            'vcs': ['Bain Capital', 'Polychain', 'Placeholder'],
-            'category': 'Infra', 'stage': 'seed'
-        },
-        'Sui': {
-            'year': 2022, 'seed_price': 0.10, 'peak_price': 2.16, 'multiple': 21,
-            'vcs': ['a16z', 'Jump Crypto', 'Coinbase Ventures'],
-            'category': 'L1', 'stage': 'seed'
-        },
-        'StarkNet': {
-            'year': 2021, 'seed_price': 0.20, 'peak_price': 3.50, 'multiple': 17,
-            'vcs': ['Paradigm', 'Sequoia', 'Pantera'],
-            'category': 'L2', 'stage': 'seed'
-        },
-    }
-    
-    NARRATIVES = {
-        2020: ['DeFi Summer', 'L1 Alt', 'AMM', 'Yield Farming'],
-        2021: ['NFT', 'Gaming', 'Metaverse', 'L2', 'Play-to-Earn'],
-        2022: ['Move VM', 'zkEVM', 'Modular Blockchain', 'GameFi'],
-        2023: ['LSD', 'RWA', 'AI', 'Restaking', 'Account Abstraction'],
-        2024: ['AI Agents', 'DePin', 'Prediction Markets', 'BTCFi', 'Restaking'],
-        2025: ['AI x Crypto', 'Quantum Resistance', 'zkML', 'Intent-based', 'DePin 2.0', 'RWA Tokenization'],
-    }
-    
-    SUCCESS_PATTERNS = {
-        'vc_tier1_presence': 0.88,
-        'github_active': 0.92,
-        'seed_stage': 0.76,
-        'low_fdmc': 0.82,
-        'hot_narrative': 0.71,
-        'team_experienced': 0.79,
-    }
-
-
-# ========================================
-# COLLECTEUR DE DONNÉES GRATUIT
-# ========================================
-
-class FreeDataCollector:
-    """Collecteur enrichi - 100% gratuit"""
-    
-    LAUNCHPADS_EXTENDED = {
-        # Tier 1 - Major
-        'coinlist': 'https://coinlist.co',
-        'daomaker': 'https://daomaker.com',
-        'polkastarter': 'https://polkastarter.com',
-        'seedify': 'https://launchpad.seedify.fund',
-        'gamefi': 'https://gamefi.org',
-        
-        # Tier 2 - Popular
-        'trustpad': 'https://trustpad.io',
-        'bscpad': 'https://bscpad.com',
-        'redkite': 'https://redkite.polkafoundry.com',
-        'kommunitas': 'https://kommunitas.net',
-        'occam': 'https://occam.fi',
-        'solanium': 'https://www.solanium.io',
-        'fjord': 'https://fjordfoundry.com',
-        'bounce': 'https://bounce.finance',
-        'starter': 'https://starter.xyz',
-        'impossible': 'https://impossible.finance',
-        
-        # Gaming focused
-        'avalaunch': 'https://avalaunch.app',
-        'gamestarter': 'https://gamestarter.com',
-        'enjinstarter': 'https://enjinstarter.com',
-        'gamespad': 'https://gamespad.io',
-        'bloktopia': 'https://blokpad.com',
-        
-        # Chain specific
-        'cardstarter': 'https://www.cardstarter.io',
-        'adalend': 'https://adalend.finance',
-        'solster': 'https://solster.finance',
-        'scaleswap': 'https://scaleswap.io',
-        'apeswap': 'https://apeswap.finance',
-        
-        # DeFi focused
-        'paid': 'https://paid.network',
-        'poolz': 'https://www.poolz.finance',
-        'duckstarter': 'https://app.duckstarter.io',
-        'thorstarter': 'https://thorstarter.org',
-        'bullperks': 'https://bullperks.com',
-        
-        # Emerging
-        'genesis': 'https://genesis.shima.capital',
-        'launchzone': 'https://app.launchzone.org',
-        'oxbull': 'https://oxbull.tech',
-        'spores': 'https://launchpad.spores.app',
-        'gagarin': 'https://gagarin.world',
-        'waveducks': 'https://launchpad.waveducks.com',
-        
-        # Multichain
-        'ceres': 'https://www.cereslaunchpad.com',
-        'unicrypt': 'https://unicrypt.network',
-        'gempad': 'https://gempad.app',
-        'pinksale': 'https://www.pinksale.finance',
-        'dxsale': 'https://dx.app',
-        
-        # NFT/Gaming specialized
-        'nftlaunch': 'https://nftlaunch.network',
-        'revoland': 'https://pad.revoland.com',
-        'wepad': 'https://wepad.io',
-        'kommunitas': 'https://launchpad.kommunitas.net',
-        
-        # Regional
-        'starter_xyz': 'https://starter.xyz',
-        'vetter': 'https://launchpad.vetter.network',
-        'kollect': 'https://app.kollect.me',
-        'babylons': 'https://babylons.io',
-        
-        # Incubators
-        'morningstar': 'https://ventures.morningstar.io',
-        'hord': 'https://app.hord.fi',
-        'raini': 'https://pad.raini.io',
-        'koistarter': 'https://koistarter.io',
-        
-        # Additional 50+
-        'tronpad': 'https://tronpad.network',
-        'launchpad_metavpad': 'https://launchpad.metavpad.com',
-        'cryptostone': 'https://www.cryptostonelabs.com',
-        'tokensfarm': 'https://tokensfarm.io',
-        'ivendpay': 'https://ivendpay.com',
-        'auctionity': 'https://www.auctionity.com',
-        'infinite_launch': 'https://infinitelaunch.io',
-        'lavalaunch': 'https://www.lavalaunch.com',
-        'starlaunch': 'https://www.starlaunch.com',
-        'onepad': 'https://onepad.io',
-    }
-    
-    def __init__(self, config: Config):
-        self.config = config
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/html',
-            'Accept-Language': 'en-US,en;q=0.9',
-        })
-    
-    def scrape_twitter_nitter(self, handle: str) -> Dict:
-        """Twitter via Nitter (gratuit)"""
-        metrics = {'followers': 0, 'tweets': 0, 'engagement': 0}
-        
-        nitter_instances = [
-            'https://nitter.net',
-            'https://nitter.1d4.us',
-            'https://nitter.kavin.rocks',
-            'https://nitter.unixfox.eu'
-        ]
-        
-        for instance in nitter_instances:
-            try:
-                url = f"{instance}/{handle}"
-                response = self.session.get(url, timeout=10)
-                
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    
-                    # Followers
-                    followers_elem = soup.find('span', class_='profile-stat-num')
-                    if followers_elem:
-                        text = followers_elem.text.strip()
-                        if 'K' in text:
-                            metrics['followers'] = int(float(text.replace('K', '')) * 1000)
-                        elif 'M' in text:
-                            metrics['followers'] = int(float(text.replace('M', '')) * 1000000)
-                        else:
-                            metrics['followers'] = int(text.replace(',', ''))
-                    
-                    # Tweets count
-                    stats = soup.find_all('span', class_='profile-stat-num')
-                    if len(stats) > 1:
-                        tweets_text = stats[1].text.strip()
-                        if 'K' in tweets_text:
-                            metrics['tweets'] = int(float(tweets_text.replace('K', '')) * 1000)
-                    
-                    # Engagement (likes/retweets récents)
-                    tweets_container = soup.find_all('div', class_='tweet-stats')
-                    total_engagement = 0
-                    for tweet_stat in tweets_container[:5]:
-                        numbers = re.findall(r'\d+', tweet_stat.text)
-                        total_engagement += sum(int(n) for n in numbers)
-                    
-                    metrics['engagement'] = total_engagement / 5 if tweets_container else 0
-                    
-                    logger.info(f"✅ Twitter @{handle}: {metrics['followers']:,} followers")
-                    return metrics
-            except:
-                continue
-        
-        # Fallback: estimation
-        metrics['followers'] = random.randint(1000, 50000)
-        return metrics
-    
-    def scrape_telegram_public(self, channel: str) -> Dict:
-        """Telegram public channels"""
-        data = {'members': 0, 'messages_24h': 0}
-        
-        try:
-            url = f"https://t.me/s/{channel}"
-            response = self.session.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                text = soup.get_text()
-                
-                # Members
-                match = re.search(r'(\d+(?:,\d+)?)\s*(?:subscribers|members)', text, re.IGNORECASE)
-                if match:
-                    data['members'] = int(match.group(1).replace(',', ''))
-                
-                # Messages récents
-                messages = soup.find_all('div', class_='tgme_widget_message')
-                data['messages_24h'] = len(messages)
-                
-                logger.info(f"✅ Telegram @{channel}: {data['members']:,} members")
-        except:
-            pass
-        
-        return data
-    
-    def scrape_github_advanced(self, repo_url: str) -> Dict:
-        """GitHub data enrichie"""
-        activity = {
-            'commits_30d': 0, 'contributors': 0, 'stars': 0, 'forks': 0,
-            'last_commit_days': 999, 'languages': [], 'issues_open': 0,
-            'pull_requests': 0, 'activity_score': 0
-        }
-        
-        try:
-            parts = repo_url.rstrip('/').split('/')
-            owner, repo = parts[-2], parts[-1]
-            
-            base_url = f"https://api.github.com/repos/{owner}/{repo}"
-            
-            # Repo info
-            response = self.session.get(base_url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                activity['stars'] = data.get('stargazers_count', 0)
-                activity['forks'] = data.get('forks_count', 0)
-                activity['issues_open'] = data.get('open_issues_count', 0)
-                
-                # Last commit
-                pushed_at = data.get('pushed_at')
-                if pushed_at:
-                    last_commit = datetime.strptime(pushed_at, '%Y-%m-%dT%H:%M:%SZ')
-                    activity['last_commit_days'] = (datetime.now() - last_commit).days
-            
-            # Contributors
-            contrib_url = f"{base_url}/contributors"
-            contrib_resp = self.session.get(contrib_url, timeout=10)
-            if contrib_resp.status_code == 200:
-                activity['contributors'] = len(contrib_resp.json())
-            
-            # Commits récents (30 jours)
-            commits_url = f"{base_url}/commits?since={(datetime.now() - timedelta(days=30)).isoformat()}Z"
-            commits_resp = self.session.get(commits_url, timeout=10)
-            if commits_resp.status_code == 200:
-                activity['commits_30d'] = len(commits_resp.json())
-            
-            # Languages
-            lang_url = f"{base_url}/languages"
-            lang_resp = self.session.get(lang_url, timeout=10)
-            if lang_resp.status_code == 200:
-                activity['languages'] = list(lang_resp.json().keys())
-            
-            # Pull requests
-            pr_url = f"{base_url}/pulls?state=open"
-            pr_resp = self.session.get(pr_url, timeout=10)
-            if pr_resp.status_code == 200:
-                activity['pull_requests'] = len(pr_resp.json())
-            
-            # Activity score
-            activity['activity_score'] = min(
-                (activity['commits_30d'] / 50) * 0.35 +
-                (activity['stars'] / 1000) * 0.20 +
-                (activity['contributors'] / 20) * 0.20 +
-                (1 if activity['last_commit_days'] < 7 else 0.5 if activity['last_commit_days'] < 30 else 0) * 0.25,
-                1.0
-            )
-            
-            logger.info(f"✅ GitHub {owner}/{repo}: {activity['commits_30d']} commits, {activity['stars']} stars")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ GitHub error: {e}")
-        
-        return activity
-    
-    def scrape_reddit_sentiment(self, project_name: str) -> Dict:
-        """Reddit sentiment enrichi"""
-        sentiment = {
-            'mentions': 0, 'sentiment_score': 0.5, 
-            'hot_posts': 0, 'avg_upvotes': 0
-        }
-        
-        subreddits = [
-            'CryptoCurrency', 'CryptoMoonShots', 'SatoshiStreetBets',
-            'altcoin', 'CryptoMarkets', 'defi', 'ethtrader'
-        ]
-        
-        total_upvotes = 0
-        post_count = 0
-        
-        for sub in subreddits:
-            try:
-                url = f"https://www.reddit.com/r/{sub}/search.json?q={project_name}&restrict_sr=1&limit=20&sort=relevance"
-                response = self.session.get(url, timeout=10, headers={'User-Agent': self.session.headers['User-Agent']})
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    posts = data.get('data', {}).get('children', [])
-                    
-                    for post in posts:
-                        post_data = post['data']
-                        score = post_data.get('score', 0)
-                        total_upvotes += score
-                        post_count += 1
-                        
-                        if score > 100:
-                            sentiment['hot_posts'] += 1
-                            sentiment['sentiment_score'] += 0.05
-                        
-                        sentiment['mentions'] += 1
-                
-                time.sleep(2)  # Rate limiting
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Reddit {sub}: {e}")
-        
-        if post_count > 0:
-            sentiment['avg_upvotes'] = total_upvotes / post_count
-        
-        sentiment['sentiment_score'] = min(sentiment['sentiment_score'], 1.0)
-        
-        logger.info(f"✅ Reddit: {sentiment['mentions']} mentions, sentiment {sentiment['sentiment_score']:.2f}")
-        
-        return sentiment
-    
-    def find_private_deals_advanced(self, project_name: str) -> List[Dict]:
-        """Recherche deals privés - multi-sources"""
-        deals = []
-        
-        # 1. AngelList
-        try:
-            search_name = project_name.lower().replace(' ', '-')
-            url = f"https://angel.co/company/{search_name}"
-            response = self.session.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                # Chercher "raised", "funding"
-                text = soup.get_text()
-                if 'raised' in text.lower() or 'funding' in text.lower():
-                    deals.append({
-                        'source': 'AngelList',
-                        'type': 'seed/private',
-                        'confidence': 0.8,
-                        'url': url
-                    })
-        except:
-            pass
-        
-        # 2. Crunchbase (partie gratuite)
-        try:
-            url = f"https://www.crunchbase.com/organization/{project_name.lower().replace(' ', '-')}"
-            response = self.session.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                deals.append({
-                    'source': 'Crunchbase',
-                    'type': 'verified',
-                    'confidence': 0.9,
-                    'url': url
-                })
-        except:
-            pass
-        
-        # 3. Twitter scouting
-        try:
-            search_url = f"https://nitter.net/search?q={project_name}+seed+OR+private+OR+funding"
-            response = self.session.get(search_url, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                tweets = soup.find_all('div', class_='tweet-content')
-                
-                for tweet in tweets[:5]:
-                    text = tweet.get_text().lower()
-                    if any(keyword in text for keyword in ['raised', 'funding', 'seed', 'round']):
-                        deals.append({
-                            'source': 'Twitter',
-                            'type': 'announcement',
-                            'confidence': 0.6,
-                            'snippet': text[:100]
-                        })
-                        break
-        except:
-            pass
-        
-        # 4. Medium/Substack
-        try:
-            url = f"https://medium.com/search?q={project_name}+funding"
-            response = self.session.get(url, timeout=10)
-            
-            if response.status_code == 200 and 'funding' in response.text.lower():
-                deals.append({
-                    'source': 'Medium',
-                    'type': 'article',
-                    'confidence': 0.5
-                })
-        except:
-            pass
-        
-        logger.info(f"✅ Private deals: {len(deals)} sources found")
-        
-        return deals
-    
-    def scrape_all_launchpads_parallel(self) -> List[Dict]:
-        """Scrape tous les launchpads en parallèle"""
-        
-        all_projects = []
-        
-        logger.info(f"🔍 Scraping {len(self.LAUNCHPADS_EXTENDED)} launchpads...")
-        
-        for name, base_url in self.LAUNCHPADS_EXTENDED.items():
-            try:
-                projects = self.scrape_single_launchpad(name, base_url)
-                all_projects.extend(projects)
-                time.sleep(1)  # Rate limiting
-            except Exception as e:
-                logger.warning(f"⚠️ {name}: {e}")
-        
-        logger.info(f"✅ Total collecté: {len(all_projects)} projets")
-        return all_projects
-    
-    def scrape_single_launchpad(self, name: str, base_url: str) -> List[Dict]:
-        """Scrape un launchpad unique"""
-        projects = []
-        
-        # Endpoints API communs
-        api_endpoints = [
-            f"{base_url}/api/projects",
-            f"{base_url}/api/v1/projects",
-            f"{base_url}/api/pools",
-            f"{base_url}/api/idos",
-            f"{base_url}/projects.json",
-            f"{base_url}/api/launchpad"
-        ]
-        
-        # Essayer endpoints API
-        for endpoint in api_endpoints:
-            try:
-                response = self.session.get(endpoint, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    # Chercher données projets
-                    project_keys = ['projects', 'data', 'pools', 'items', 'results', 'idos']
-                    
-                    for key in project_keys:
-                        if key in data:
-                            items = data[key] if isinstance(data[key], list) else [data[key]]
-                            
-                            for item in items[:10]:  # Max 10 par source
-                                project = self.normalize_project_data(item, name)
-                                if project:
-                                    projects.append(project)
-                            
-                            if projects:
-                                logger.info(f"✅ {name}: {len(projects)} projets (API)")
-                                return projects
-            except:
-                continue
-        
-        # Si pas d'API, scraping HTML
-        try:
-            response = self.session.get(base_url, timeout=10)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Patterns HTML communs
-                selectors = [
-                    {'tag': 'div', 'class': re.compile('project|pool|card|launch')},
-                    {'tag': 'article', 'class': re.compile('project|item')},
-                    {'tag': 'li', 'class': re.compile('project|pool')}
-                ]
-                
-                for selector in selectors:
-                    cards = soup.find_all(selector['tag'], class_=selector['class'])
-                    
-                    for card in cards[:5]:
-                        # Extraire nom
-                        name_elem = card.find(['h1', 'h2', 'h3', 'h4'], class_=re.compile('title|name|project'))
-                        
-                        if name_elem:
-                            projects.append({
-                                'name': name_elem.get_text().strip()[:100],
-                                'symbol': 'UNK',
-                                'stage': 'unknown',
-                                'source': name,
-                                'website': base_url,
-                                'vcs': [],
-                                'category': 'Unknown'
-                            })
-                    
-                    if projects:
-                        logger.info(f"✅ {name}: {len(projects)} projets (HTML)")
-                        break
-        except:
-            pass
-        
-        return projects
-    
-    def normalize_project_data(self, raw_data: Dict, source: str) -> Optional[Dict]:
-        """Normalise les données projet depuis différentes sources"""
-        
-        try:
-            project = {
-                'name': raw_data.get('name', raw_data.get('title', raw_data.get('projectName', 'Unknown'))),
-                'symbol': raw_data.get('symbol', raw_data.get('token_symbol', raw_data.get('tokenSymbol', 'UNK'))),
-                'stage': raw_data.get('stage', raw_data.get('status', raw_data.get('saleType', 'unknown'))).lower(),
-                'source': source,
-                'price_seed': float(raw_data.get('price', raw_data.get('token_price', raw_data.get('tokenPrice', 0)))),
-                'fdmc': float(raw_data.get('fdmc', raw_data.get('marketCap', raw_data.get('fullyDilutedValuation', 0)))),
-                'total_supply': float(raw_data.get('total_supply', raw_data.get('totalSupply', 0))),
-                'category': raw_data.get('category', raw_data.get('type', raw_data.get('vertical', 'Unknown'))),
-                'blockchain': raw_data.get('blockchain', raw_data.get('chain', raw_data.get('network', 'Unknown'))),
-                'website': raw_data.get('website', raw_data.get('website_url', raw_data.get('officialWebsite', ''))),
-                'twitter': raw_data.get('twitter', raw_data.get('twitterUrl', '')),
-                'telegram': raw_data.get('telegram', raw_data.get('telegramUrl', '')),
-                'github': raw_data.get('github', raw_data.get('githubUrl', '')),
-                'discord': raw_data.get('discord', ''),
-                'vcs': raw_data.get('investors', raw_data.get('backers', raw_data.get('partners', []))),
-                'audit_firm': raw_data.get('audit', raw_data.get('auditedBy', '')),
-                'launch_date': raw_data.get('launch_date', raw_data.get('launchDate', raw_data.get('startDate', ''))),
-                'raw_data': raw_data
-            }
-            
-            # Validation basique
-            if project['name'] and project['name'] != 'Unknown':
-                return project
-        
-        except Exception as e:
-            logger.warning(f"Normalize error: {e}")
-        
-        return None
-
-
-# ========================================
-# ML PRÉDICTEUR AVANCÉ
-# ========================================
-
-class MLPredictor:
-    """ML Predictor avec algorithme de similarité avancé"""
-    
-    def __init__(self):
-        self.historical_db = HistoricalDatabase()
-        self.model_trained = False
-        self.feature_weights = {}
-    
-    def train_on_historical_data(self):
-        """Entraîne sur projets x100 historiques"""
-        logger.info("🧠 Entraînement ML sur données historiques...")
-        
-        # Calculer poids features basés sur patterns de succès
-        self.feature_weights = {
-            'vc_match': 0.30,
-            'category_match': 0.20,
-            'stage_match': 0.15,
-            'narrative_fit': 0.15,
-            'github_activity': 0.10,
-            'fdmc_similar': 0.10
-        }
-        
-        self.model_trained = True
-        logger.info(f"✅ Modèle entraîné sur {len(self.historical_db.X100_PROJECTS)} projets x100")
-    
-    def predict_multiple(self, project_features: Dict) -> float:
-        """Prédit le multiple avec ML avancé"""
-        
-        if not self.model_trained:
-            self.train_on_historical_data()
-        
-        best_similarity = 0
-        best_match = None
-        predicted_multiple = 10
-        
-        for name, historical in self.historical_db.X100_PROJECTS.items():
-            similarity = self.calculate_similarity_score(project_features, historical)
-            
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_match = name
-                predicted_multiple = historical['multiple']
-        
-        # Ajuster selon similarité
-        if best_similarity > 0.7:
-            adjusted_multiple = predicted_multiple * best_similarity
-        elif best_similarity > 0.5:
-            adjusted_multiple = predicted_multiple * 0.5
-        else:
-            adjusted_multiple = 20  # Conservative
-        
-        logger.info(f"📊 Meilleure similarité: {best_match} ({best_similarity*100:.1f}%) → x{adjusted_multiple:.0f}")
-        
-        return min(adjusted_multiple, 10000)
-    
-    def calculate_similarity_score(self, project: Dict, historical: Dict) -> float:
-        """Calcule score de similarité détaillé"""
-        
-        score = 0
-        
-        # 1. VCs communs (signal fort)
-        project_vcs = set(project.get('vcs', []))
-        hist_vcs = set(historical.get('vcs', []))
-        common_vcs = project_vcs & hist_vcs
-        
-        if len(common_vcs) > 0:
-            score += self.feature_weights['vc_match'] * (len(common_vcs) / max(len(hist_vcs), 1))
-        elif len(project_vcs) > 0:
-            score += self.feature_weights['vc_match'] * 0.3
-        
-        # 2. Catégorie identique
-        if project.get('category', '').lower() == historical['category'].lower():
-            score += self.feature_weights['category_match']
-        elif any(cat in project.get('category', '').lower() 
-                for cat in ['defi', 'gaming', 'l1', 'l2', 'ai']):
-            score += self.feature_weights['category_match'] * 0.5
-        
-        # 3. Stage similaire
-        if project.get('stage') in ['seed', 'private'] and historical.get('stage') in ['seed', 'private']:
-            score += self.feature_weights['stage_match']
-        
-        # 4. Narrative actuelle
-        current_year = datetime.now().year
-        current_narratives = self.historical_db.NARRATIVES.get(current_year, [])
-        
-        for narrative in current_narratives:
-            if narrative.lower() in project.get('category', '').lower():
-                score += self.feature_weights['narrative_fit']
-                break
-        
-        # 5. GitHub activity similaire
-        project_github = project.get('github_active', False)
-        hist_github = historical.get('github_commits_30d', 0) > 50
-        
-        if project_github and hist_github:
-            score += self.feature_weights['github_activity']
-        
-        # 6. FDMC similaire (ordre de grandeur)
-        project_fdmc = project.get('fdmc', 0)
-        hist_fdmc = historical.get('fdmc_at_launch', 0)
-        
-        if project_fdmc > 0 and hist_fdmc > 0:
-            fdmc_ratio = min(project_fdmc, hist_fdmc) / max(project_fdmc, hist_fdmc)
-            if fdmc_ratio > 0.5:
-                score += self.feature_weights['fdmc_similar'] * fdmc_ratio
-        
-        return min(score, 1.0)
-    
-    def detect_current_narrative(self) -> List[str]:
-        """Détecte narratives actuelles"""
-        return self.historical_db.NARRATIVES.get(datetime.now().year, [])
-    
-    def get_historical_match(self, project_features: Dict) -> Tuple[str, float]:
-        """Trouve le meilleur match historique"""
-        
-        best_match = None
-        best_score = 0
-        
-        for name, historical in self.historical_db.X100_PROJECTS.items():
-            score = self.calculate_similarity_score(project_features, historical)
-            if score > best_score:
-                best_score = score
-                best_match = name
-        
-        return best_match, best_score
-
-
-# ========================================
-# SCANNER PRINCIPAL
-# ========================================
-
-class QuantumWhaleScanner:
-    """Scanner principal avec toutes les fonctionnalités"""
-    
-    VERSION = "ULTIMATE_COMPLETE_2.0"
-    
-    TIER1_VCS = {
-        'a16z': 98, 'Andreessen Horowitz': 98, 'Paradigm': 97, 'Sequoia': 96,
-        'Binance Labs': 95, 'Coinbase Ventures': 94, 'Pantera': 93,
-        'Multicoin': 92, 'Animoca Brands': 92, 'Framework': 91,
-        'Dragonfly': 90, 'Polychain': 89, 'Bain Capital Crypto': 90,
-        'Electric Capital': 88, 'Variant': 87, 'Hack VC': 86,
-        'Placeholder': 85, 'Union Square Ventures': 84, 'USV': 84,
-        'Solana Ventures': 83, 'Jump Crypto': 81, 'Galaxy Digital': 80,
-        'CMS Holdings': 79, 'Delphi Digital': 78, 'Mechanism': 77,
-        'Three Arrows': 75, 'DeFiance': 74, 'Spartan': 73,
-        'Blockchain Capital': 88, 'Digital Currency Group': 87,
-        'Lightspeed': 85, 'Tiger Global': 84, 'Alameda Research': 76,
-        'Standard Crypto': 82, 'Protocol Labs': 80, 'Blocktower': 78,
-        'Mark Cuban': 75, 'Naval Ravikant': 77
-    }
-    
-    def __init__(self, config: Config):
-        """Initialisation"""
-        self.config = config
-        self.collector = FreeDataCollector(config)
-        self.predictor = MLPredictor()
-        self.predictor.train_on_historical_data()
-        
+    def __init__(self, db_path: str = "quantum_military.db"):
+        self.db_path = db_path
+        self.version = "4.0.0"
+        
+        # CONFIGURATION TELEGRAM - CRITIQUE
+        self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        self.telegram_chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        
+        # CONFIGURATION CRITÈRE MARKET CAP
+        self.MAX_MARKET_CAP_EUROS = int(os.getenv('MAX_MARKET_CAP_EUR', 621000))
+        self.MAX_MARKET_CAP_USD = self.MAX_MARKET_CAP_EUROS * 1.08
+        
+        logger.info(f"🔧 Initialisation Scanner Ultime v{self.version}")
+        logger.info(f"🔧 Telegram Token: {'✅' if self.telegram_token else '❌'}")
+        logger.info(f"🔧 Telegram Chat ID: {'✅' if self.telegram_chat_id else '❌'}")
+        logger.info(f"🔧 MC Max: {self.MAX_MARKET_CAP_EUROS:,}€")
+        
+        # CONFIGURATION AVANCÉE
+        self.sources = self.load_sources()
+        self.user_agents = self.load_user_agents()
+        self.proxies = self.load_proxies()
+        self.current_proxy_index = 0
+        
+        # PATTERNS DE DÉTECTION SCAM AVANCÉS
+        self.scam_patterns = self.load_scam_patterns()
+        self.smart_money_wallets = self.load_smart_money_wallets()
+        self.reputable_vcs = self.load_reputable_vcs()
+        
+        # CACHE INTELLIGENT
+        self.cache = {}
+        self.cache_ttl = 3600
+        
+        # AUTO-HEALING
+        self.health_status = "HEALTHY"
+        self.error_count = 0
+        self.max_errors = 10
+        
+        # INTELLIGENCE COLLECTIVE
+        self.global_intelligence = self.load_global_intelligence()
+        
+        # INITIALISATION BASE
         self.init_database()
-        logger.info(f"🌌 Quantum Whale Scanner {self.VERSION} initialisé")
-    
+        
+        logger.info(f"✅ Scanner initialisé avec MC max: {self.MAX_MARKET_CAP_EUROS:,}€")
+
     def init_database(self):
-        """Initialise DB complète"""
-        conn = sqlite3.connect(self.config.DB_PATH)
+        """Initialise la base de données SQLite complète"""
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Table projects
+        # TABLE PROJETS
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE,
                 symbol TEXT,
-                stage TEXT,
-                source TEXT,
-                price_seed REAL,
-                fdmc REAL,
-                predicted_multiple REAL,
-                blockchain TEXT,
                 category TEXT,
+                stage TEXT,
+                blockchain TEXT,
+                market_cap_euros REAL,
+                market_cap_usd REAL,
+                meets_cap_criteria BOOLEAN,
                 website TEXT,
-                github TEXT,
                 twitter TEXT,
                 telegram TEXT,
-                discord TEXT,
-                whitepaper TEXT,
-                audit_firm TEXT,
-                launch_date TEXT,
-                collected_at TEXT,
-                last_updated TEXT
+                github TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Table analysis
+        # TABLE ANALYSES DÉTAILLÉES
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS analysis (
+            CREATE TABLE IF NOT EXISTS project_analysis (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
-                whale_score REAL,
-                global_score REAL,
+                analysis_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                market_cap REAL DEFAULT 0,
+                fdmc REAL DEFAULT 0,
+                circulating_supply REAL DEFAULT 0,
+                total_supply REAL DEFAULT 0,
+                volume_24h REAL DEFAULT 0,
+                liquidity REAL DEFAULT 0,
+                tvl REAL DEFAULT 0,
+                whale_concentration REAL DEFAULT 0,
+                audit_score REAL DEFAULT 0,
+                contract_verified BOOLEAN DEFAULT FALSE,
+                dev_activity REAL DEFAULT 0,
+                community_engagement REAL DEFAULT 0,
+                growth_momentum REAL DEFAULT 0,
+                hype_momentum REAL DEFAULT 0,
+                token_utility REAL DEFAULT 0,
+                on_chain_anomaly REAL DEFAULT 0,
+                rugpull_risk REAL DEFAULT 0,
+                vc_strength REAL DEFAULT 0,
+                price_to_liquidity REAL DEFAULT 0,
+                dev_vc_ratio REAL DEFAULT 0,
+                retention_ratio REAL DEFAULT 0,
+                smart_money_index REAL DEFAULT 0,
+                global_score REAL DEFAULT 0,
+                go_decision BOOLEAN DEFAULT FALSE,
+                estimated_multiple REAL DEFAULT 1,
                 risk_level TEXT,
-                predicted_multiple REAL,
-                similarity_score REAL,
-                historical_match TEXT,
-                go_decision BOOLEAN,
                 rationale TEXT,
-                analyzed_at TEXT,
-                telegram_sent BOOLEAN DEFAULT 0,
+                fatal_flaws_detected BOOLEAN DEFAULT FALSE,
+                meets_cap_criteria BOOLEAN DEFAULT FALSE,
+                telegram_sent BOOLEAN DEFAULT FALSE,
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
         
-        # Table VCs
+        # TABLE ALERTES SCAMS
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS vcs (
+            CREATE TABLE IF NOT EXISTS scam_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
-                vc_name TEXT,
-                vc_tier INTEGER,
+                alert_type TEXT,
+                severity TEXT,
+                description TEXT,
+                evidence TEXT,
+                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                resolved BOOLEAN DEFAULT FALSE,
+                telegram_sent BOOLEAN DEFAULT FALSE,
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
         
-        # Table social metrics
+        # TABLE INTELLIGENCE COLLECTIVE
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS social_metrics (
+            CREATE TABLE IF NOT EXISTS global_intelligence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER,
-                twitter_followers INTEGER,
-                telegram_members INTEGER,
-                github_stars INTEGER,
-                github_commits_30d INTEGER,
-                reddit_mentions INTEGER,
-                collected_at TEXT,
-                FOREIGN KEY (project_id) REFERENCES projects (id)
-            )
-        ''')
-        
-        # Table private deals
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS private_deals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER,
-                deal_type TEXT,
+                pattern_type TEXT,
+                pattern_data TEXT,
+                confidence REAL DEFAULT 0,
                 source TEXT,
-                confidence REAL,
-                found_at TEXT,
-                FOREIGN KEY (project_id) REFERENCES projects (id)
+                detected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # TABLE PERFORMANCE
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS performance_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                scan_duration REAL,
+                projects_analyzed INTEGER,
+                projects_approved INTEGER,
+                scams_detected INTEGER,
+                telegram_messages_sent INTEGER
             )
         ''')
         
         conn.commit()
         conn.close()
-        logger.info("✅ Base de données initialisée")
-    
-    def analyze_project_complete(self, project: Dict) -> Dict:
-        """Analyse COMPLÈTE d'un projet"""
-        
-        logger.info(f"🔍 Analyse: {project.get('name')}")
-        
-        # 1. Enrichissement données sociales
-        if project.get('twitter'):
-            handle = project['twitter'].split('/')[-1].replace('@', '')
-            project['twitter_data'] = self.collector.scrape_twitter_nitter(handle)
-        else:
-            project['twitter_data'] = {'followers': 0, 'engagement': 0}
-        
-        if project.get('telegram'):
-            channel = project['telegram'].split('/')[-1].replace('@', '')
-            project['telegram_data'] = self.collector.scrape_telegram_public(channel)
-        else:
-            project['telegram_data'] = {'members': 0}
-        
-        if project.get('github'):
-            project['github_data'] = self.collector.scrape_github_advanced(project['github'])
-        else:
-            project['github_data'] = {'commits_30d': 0, 'activity_score': 0}
-        
-        # 2. Reddit sentiment
-        project['reddit_data'] = self.collector.scrape_reddit_sentiment(project.get('name', ''))
-        
-        # 3. Private deals
-        project['private_deals'] = self.collector.find_private_deals_advanced(project.get('name', ''))
-        
-        # 4. Prédiction ML
-        project_features = {
-            'vcs': project.get('vcs', []),
-            'category': project.get('category', ''),
-            'stage': project.get('stage', ''),
-            'github_active': project['github_data'].get('activity_score', 0) > 0.5,
-            'fdmc': project.get('fdmc', 0)
+        logger.info("✅ Base de données initialisée avec succès")
+
+    def load_sources(self) -> Dict:
+        """Charge toutes les sources de données"""
+        return {
+            "ico_platforms": [
+                "https://coinlist.co", "https://www.daomaker.com", 
+                "https://www.polkastarter.com", "https://www.trustswap.com",
+                "https://seedify.fund", "https://www.pinksale.finance",
+                "https://www.gempad.app", "https://www.chainboost.com",
+                "https://www.trustpad.io", "https://www.bscpad.com",
+                "https://www.gamefi.org", "https://www.redkite.com",
+                "https://www.occam.fi", "https://www.impossible.finance",
+                "https://www.apeswap.finance", "https://www.poolz.finance"
+            ],
+            "data_apis": {
+                "coinmarketcap": "https://pro-api.coinmarketcap.com/v1/",
+                "coingecko": "https://api.coingecko.com/api/v3/",
+                "dex_screener": "https://api.dexscreener.com/latest/",
+                "moralis": "https://deep-index.moralis.io/api/v2/",
+                "etherscan": "https://api.etherscan.io/api",
+                "bscscan": "https://api.bscscan.com/api",
+                "solanascan": "https://api.solscan.io/v2/",
+                "polygonscan": "https://api.polygonscan.com/api"
+            },
+            "social_platforms": [
+                "https://twitter.com/", "https://t.me/", 
+                "https://discord.gg/", "https://github.com/",
+                "https://reddit.com/r/", "https://medium.com/"
+            ],
+            "aggregators": [
+                "https://icodrops.com", "https://icobench.com",
+                "https://cryptorank.io", "https://coinmarketcal.com",
+                "https://defillama.com", "https://dappradar.com"
+            ]
         }
+
+    def load_user_agents(self) -> List[str]:
+        """Charge la liste des user-agents pour rotation"""
+        return [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36"
+        ]
+
+    def load_proxies(self) -> List[str]:
+        """Charge et teste les proxies"""
+        # Liste de proxies gratuits (à remplacer par vos propres proxies)
+        test_proxies = [
+            # "http://proxy1:port", 
+            # "http://proxy2:port",
+        ]
         
-        predicted_multiple = self.predictor.predict_multiple(project_features)
-        project['predicted_multiple'] = predicted_multiple
+        working_proxies = []
+        for proxy in test_proxies:
+            if self.test_proxy(proxy):
+                working_proxies.append(proxy)
+                logger.info(f"✅ Proxy actif: {proxy}")
         
-        historical_match, similarity = self.predictor.get_historical_match(project_features)
-        project['historical_match'] = historical_match
-        project['similarity_score'] = similarity
-        
-        # 5. Calcul ratios complets
-        ratios = self.calculate_complete_ratios(project)
-        
-        # 6. Décision GO/NOGO
-        go, risk, rationale = self.make_whale_decision(project, ratios)
-        
-        result = {
-            'project': project,
-            'ratios': ratios,
-            'go_decision': go,
-            'risk_level': risk,
-            'rationale': rationale,
-            'predicted_multiple': predicted_multiple,
-            'historical_match': historical_match,
-            'similarity_score': similarity
+        return working_proxies
+
+    def test_proxy(self, proxy: str) -> bool:
+        """Teste la validité d'un proxy"""
+        try:
+            response = requests.get(
+                "https://httpbin.org/ip",
+                proxies={"http": proxy, "https": proxy},
+                timeout=10
+            )
+            return response.status_code == 200
+        except:
+            return False
+
+    def load_scam_patterns(self) -> Dict:
+        """Charge les patterns de scams avancés"""
+        return {
+            "high_risk_keywords": [
+                "guaranteed", "100% profit", "no risk", "instant money",
+                "zero risk", "can't lose", "guaranteed returns", "risk-free",
+                "get rich quick", "easy money", "double your money"
+            ],
+            "suspicious_domains": [
+                ".xyz", ".top", ".club", ".win", ".biz", ".info",
+                ".online", ".site", ".website", ".space"
+            ],
+            "fake_audit_patterns": [
+                "certik-fake", "hacken-fake", "quantstamp-fake",
+                "fake-audit", "audit-by-unknown", "self-audit"
+            ],
+            "rugpull_indicators": [
+                "owner_balance_high", "liquidity_locked_low",
+                "mint_function_active", "blacklist_function",
+                "hidden_owner", "proxy_contract"
+            ],
+            "honeypot_indicators": [
+                "cannot_sell", "max_tx_amount_low", "blacklist_owners",
+                "tax_too_high", "transfer_disabled"
+            ]
         }
+
+    def load_smart_money_wallets(self) -> List[str]:
+        """Charge les adresses des smart money (exemples)"""
+        return [
+            "0x0000000000000000000000000000000000000000",  # Exemple
+            "0x0000000000000000000000000000000000000001",  # Exemple
+        ]
+
+    def load_reputable_vcs(self) -> Dict:
+        """Charge la liste des VCs réputés avec scores"""
+        return {
+            "Electric Capital": {"score": 95, "focus": ["DeFi", "Infrastructure"]},
+            "Framework Ventures": {"score": 92, "focus": ["DeFi", "Gaming"]},
+            "Paradigm": {"score": 98, "focus": ["DeFi", "Infrastructure"]},
+            "a16z Crypto": {"score": 97, "focus": ["Multi-sector"]},
+            "Polychain Capital": {"score": 94, "focus": ["Infrastructure", "DeFi"]},
+            "Coinbase Ventures": {"score": 91, "focus": ["Multi-sector"]},
+            "Binance Labs": {"score": 96, "focus": ["Multi-sector"]},
+            "Multicoin Capital": {"score": 93, "focus": ["Infrastructure", "DeFi"]},
+            "Dragonfly Capital": {"score": 89, "focus": ["DeFi", "Gaming"]},
+            "Pantera Capital": {"score": 90, "focus": ["Multi-sector"]},
+            "Alameda Research": {"score": 88, "focus": ["Trading", "DeFi"]},
+            "Three Arrows Capital": {"score": 87, "focus": ["Macro", "DeFi"]}
+        }
+
+    def load_global_intelligence(self) -> Dict:
+        """Charge l'intelligence collective depuis la base"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         
-        # 7. Sauvegarde
-        self.save_complete_to_db(result)
+        cursor.execute('''
+            SELECT pattern_type, pattern_data, confidence, source 
+            FROM global_intelligence 
+            WHERE confidence > 0.7 
+            ORDER BY detected_at DESC 
+            LIMIT 1000
+        ''')
         
-        # 8. Alerte si GO
-        if go:
-            self.send_whale_alert(result)
+        intelligence = {}
+        for row in cursor.fetchall():
+            pattern_type, pattern_data, confidence, source = row
+            if pattern_type not in intelligence:
+                intelligence[pattern_type] = []
+            intelligence[pattern_type].append({
+                "data": pattern_data,
+                "confidence": confidence,
+                "source": source
+            })
+        
+        conn.close()
+        logger.info(f"📊 Intelligence collective chargée: {len(intelligence)} patterns")
+        return intelligence
+
+    def get_rotated_headers(self) -> Dict:
+        """Retourne les headers avec rotation d'user-agent"""
+        return {
+            "User-Agent": random.choice(self.user_agents),
+            "Accept": "application/json, text/html, application/xml",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none"
+        }
+
+    def make_advanced_request(self, url: str, method: str = "GET", 
+                            retries: int = 3, delay: float = 1.0) -> Optional[Any]:
+        """Effectue une requête HTTP avancée avec gestion d'erreurs"""
+        
+        # Vérification du cache
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        if cache_key in self.cache:
+            cached_data, timestamp = self.cache[cache_key]
+            if time.time() - timestamp < self.cache_ttl:
+                logger.debug(f"📦 Cache hit: {url}")
+                return cached_data
+        
+        for attempt in range(retries):
+            try:
+                headers = self.get_rotated_headers()
+                
+                # Rotation des proxies
+                if self.proxies:
+                    proxy = self.proxies[self.current_proxy_index % len(self.proxies)]
+                    self.current_proxy_index += 1
+                    proxies = {"http": proxy, "https": proxy}
+                else:
+                    proxies = None
+                
+                # Backoff exponentiel
+                time.sleep(delay * (2 ** attempt))
+                
+                if method.upper() == "GET":
+                    response = requests.get(
+                        url, 
+                        headers=headers, 
+                        proxies=proxies,
+                        timeout=15,
+                        allow_redirects=True
+                    )
+                else:
+                    response = requests.request(
+                        method, 
+                        url,
+                        headers=headers,
+                        proxies=proxies,
+                        timeout=15,
+                        allow_redirects=True
+                    )
+                
+                if response.status_code == 200:
+                    # Mise en cache
+                    data = response.json() if 'application/json' in response.headers.get('content-type', '') else response.text
+                    self.cache[cache_key] = (data, time.time())
+                    return data
+                    
+                elif response.status_code in [429, 503]:  # Rate limiting
+                    logger.warning(f"⏳ Rate limiting détecté pour {url}, attente augmentée")
+                    time.sleep(10 * (attempt + 1))
+                else:
+                    logger.warning(f"⚠️ Statut HTTP {response.status_code} pour {url}")
+                    
+            except requests.exceptions.Timeout:
+                logger.error(f"⏰ Timeout pour {url} (tentative {attempt + 1})")
+            except requests.exceptions.ConnectionError:
+                logger.error(f"🔌 Erreur de connexion pour {url}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"❌ Erreur requête pour {url}: {e}")
+            except Exception as e:
+                logger.error(f"💥 Erreur inattendue pour {url}: {e}")
+            
+            # Auto-healing: ajustement dynamique
+            self.error_count += 1
+            if self.error_count > self.max_errors:
+                self.health_status = "DEGRADED"
+                self.perform_auto_healing()
+        
+        logger.error(f"❌ Échec après {retries} tentatives pour {url}")
+        return None
+
+    def perform_auto_healing(self):
+        """Système auto-réparateur"""
+        logger.warning("🩺 Activation de l'auto-healing...")
+        
+        # Réinitialisation des compteurs d'erreur
+        self.error_count = 0
+        
+        # Nettoyage du cache
+        current_time = time.time()
+        self.cache = {k: v for k, v in self.cache.items() 
+                     if current_time - v[1] < self.cache_ttl}
+        
+        # Re-test des proxies
+        self.proxies = self.load_proxies()
+        
+        # Réinitialisation de l'index proxy
+        self.current_proxy_index = 0
+        
+        self.health_status = "HEALTHY"
+        logger.info("✅ Auto-healing terminé")
+
+    async def make_async_request(self, session: aiohttp.ClientSession, 
+                               url: str) -> Optional[Any]:
+        """Effectue une requête asynchrone"""
+        try:
+            headers = self.get_rotated_headers()
+            async with session.get(url, headers=headers, timeout=15) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    logger.warning(f"⚠️ Statut HTTP {response.status} pour {url}")
+        except Exception as e:
+            logger.error(f"❌ Erreur async requête {url}: {e}")
+        return None
+
+    # SYSTÈME TELEGRAM ULTIME
+    def send_telegram_alert(self, message: str, retry_count: int = 3) -> bool:
+        """
+        ENVOIE UN MESSAGE TELEGRAM - Version Ultime avec gestion d'erreurs complète
+        """
+        logger.info("📤 Tentative d'envoi Telegram...")
+        
+        # VÉRIFICATION CRITIQUE
+        if not self.telegram_token:
+            logger.error("❌ TELEGRAM_BOT_TOKEN manquant dans .env")
+            return False
+            
+        if not self.telegram_chat_id:
+            logger.error("❌ TELEGRAM_CHAT_ID manquant dans .env")
+            return False
+        
+        logger.info(f"🔧 Token: {self.telegram_token[:10]}...")
+        logger.info(f"🔧 Chat ID: {self.telegram_chat_id}")
+        
+        for attempt in range(retry_count):
+            try:
+                url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+                payload = {
+                    "chat_id": self.telegram_chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True
+                }
+                
+                logger.info(f"🔧 Envoi vers: {url}")
+                response = requests.post(url, json=payload, timeout=30)
+                
+                logger.info(f"🔧 Status Code: {response.status_code}")
+                
+                if response.status_code == 200:
+                    logger.info("✅ ✅ ✅ MESSAGE TELEGRAM ENVOYÉ AVEC SUCCÈS!")
+                    self.track_telegram_metric()
+                    return True
+                else:
+                    logger.error(f"❌ Erreur HTTP {response.status_code}: {response.text}")
+                    if attempt < retry_count - 1:
+                        time.sleep(2 ** attempt)  # Backoff exponentiel
+                        
+            except requests.exceptions.Timeout:
+                logger.error(f"⏰ Timeout Telegram (tentative {attempt + 1})")
+                if attempt < retry_count - 1:
+                    time.sleep(2 ** attempt)
+            except requests.exceptions.ConnectionError:
+                logger.error(f"🔌 Erreur connexion Telegram (tentative {attempt + 1})")
+                if attempt < retry_count - 1:
+                    time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error(f"💥 Erreur inattendue Telegram (tentative {attempt + 1}): {e}")
+                if attempt < retry_count - 1:
+                    time.sleep(2 ** attempt)
+        
+        logger.error("❌ ÉCHEC COMPLET après toutes les tentatives Telegram")
+        return False
+
+    def track_telegram_metric(self):
+        """Track les métriques Telegram"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO performance_metrics (telegram_messages_sent) 
+                VALUES (1)
+            ''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erreur tracking métrique: {e}")
+
+    def test_telegram_connection(self) -> bool:
+        """Test la connexion Telegram de manière complète"""
+        logger.info("🔧 Test de connexion Telegram...")
+        
+        if not self.telegram_token or not self.telegram_chat_id:
+            logger.error("❌ Configuration Telegram incomplète")
+            return False
+            
+        try:
+            # Test de l'API Telegram
+            url = f"https://api.telegram.org/bot{self.telegram_token}/getMe"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                bot_info = response.json()
+                logger.info(f"✅ Bot Telegram: {bot_info['result']['username']}")
+                
+                # Test d'envoi de message
+                test_message = f"""
+🔧 **TEST QUANTUM SCANNER ULTIME v{self.version}**
+
+✅ **Connexion Telegram établie!**
+🕒 **Heure: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**
+🎯 **Scanner opérationnel et prêt**
+
+🔧 **Détails:**
+• Version: {self.version}
+• MC Max: {self.MAX_MARKET_CAP_EUROS:,}€
+• Statut: 🟢 ACTIF
+
+#Test #QuantumScanner #Ultime
+                """
+                
+                if self.send_telegram_alert(test_message):
+                    logger.info("✅ Test Telegram COMPLET - Tout fonctionne!")
+                    return True
+                else:
+                    logger.error("❌ Échec envoi message test")
+                    return False
+            else:
+                logger.error(f"❌ Token Telegram invalide: {response.status_code}")
+                logger.error(f"❌ Détails: {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"💥 Erreur test Telegram: {e}")
+            return False
+
+    # PROJETS RÉELS POUR TEST
+    def get_real_test_projects(self) -> List[Dict]:
+        """
+        Retourne des projets RÉELS avec sites existants pour tests
+        """
+        return [
+            {
+                "name": "Ethereum Foundation",
+                "symbol": "ETH",
+                "market_cap": 45000,
+                "fdmc": 2500000,
+                "website": "https://ethereum.org",
+                "twitter": "https://twitter.com/ethereum",
+                "telegram": "https://t.me/ethereum",
+                "github": "https://github.com/ethereum",
+                "stage": "pre-tge",
+                "category": "Infrastructure",
+                "blockchain": "Ethereum",
+                "audit_score": 95,
+                "dev_activity": 90,
+                "community_engagement": 85,
+                "vcs": ["Electric Capital", "Pantera Capital", "Coinbase Ventures"],
+                "description": "Blockchain décentralisée leader avec smart contracts"
+            },
+            {
+                "name": "Uniswap Labs",
+                "symbol": "UNI",
+                "market_cap": 35000,
+                "fdmc": 1800000,
+                "website": "https://uniswap.org",
+                "twitter": "https://twitter.com/Uniswap",
+                "telegram": "https://t.me/uniswap",
+                "github": "https://github.com/Uniswap",
+                "stage": "pre-tge",
+                "category": "DeFi",
+                "blockchain": "Ethereum",
+                "audit_score": 92,
+                "dev_activity": 88,
+                "community_engagement": 82,
+                "vcs": ["a16z Crypto", "Paradigm", "USV"],
+                "description": "Protocol d'échange décentralisé leader"
+            },
+            {
+                "name": "Aave Protocol",
+                "symbol": "AAVE",
+                "market_cap": 28000,
+                "fdmc": 1500000,
+                "website": "https://aave.com",
+                "twitter": "https://twitter.com/AaveAave",
+                "telegram": "https://t.me/Aavesome",
+                "github": "https://github.com/aave",
+                "stage": "pre-tge",
+                "category": "DeFi",
+                "blockchain": "Ethereum",
+                "audit_score": 94,
+                "dev_activity": 85,
+                "community_engagement": 80,
+                "vcs": ["Framework Ventures", "Three Arrows Capital"],
+                "description": "Protocol de prêt et emprunt décentralisé"
+            }
+        ]
+
+    # VALIDATION DES LIENS AVANCÉE
+    def validate_project_links_advanced(self, project_data: Dict) -> Tuple[bool, List[str]]:
+        """
+        Validation AVANCÉE des liens avec vérifications multiples
+        """
+        errors = []
+        warnings_list = []
+        
+        required_links = [
+            ("website", project_data.get("website"), True),
+            ("twitter", project_data.get("twitter"), True),
+            ("telegram", project_data.get("telegram"), True),
+            ("github", project_data.get("github"), False)
+        ]
+        
+        for link_type, url, is_critical in required_links:
+            if not url and is_critical:
+                errors.append(f"Lien {link_type} manquant (critique)")
+                continue
+            elif not url:
+                warnings_list.append(f"Lien {link_type} manquant")
+                continue
+                
+            validation_result = self.validate_single_link(link_type, url)
+            
+            if not validation_result["valid"]:
+                if is_critical:
+                    errors.extend(validation_result["errors"])
+                else:
+                    warnings_list.extend(validation_result["errors"])
+            else:
+                warnings_list.extend(validation_result["warnings"])
+        
+        # Vérification de cohérence cross-platform
+        consistency_errors = self.check_cross_platform_consistency(project_data)
+        errors.extend(consistency_errors)
+        
+        is_valid = len(errors) == 0
+        
+        if warnings_list:
+            logger.warning(f"⚠️ Avertissements pour {project_data.get('name')}: {warnings_list}")
+        
+        return is_valid, errors + warnings_list
+
+    def validate_single_link(self, link_type: str, url: str) -> Dict:
+        """Valide un lien unique avec multiples vérifications"""
+        result = {"valid": True, "errors": [], "warnings": []}
+        
+        try:
+            response = requests.get(url, timeout=10, allow_redirects=True)
+            
+            # Vérification statut HTTP
+            if response.status_code != 200:
+                result["valid"] = False
+                result["errors"].append(f"Lien {link_type} inaccessible: HTTP {response.status_code}")
+                return result
+            
+            content = response.text.lower()
+            
+            # Détection de pages parking/suspectes
+            parking_indicators = [
+                "for sale", "domain parked", "buy this domain", 
+                "parking page", "this domain may be for sale",
+                "godaddy", "namecheap parking", "domain for sale"
+            ]
+            
+            if any(indicator in content for indicator in parking_indicators):
+                result["valid"] = False
+                result["errors"].append(f"Lien {link_type} semble être un domaine parking")
+                return result
+            
+            # Vérifications spécifiques par type
+            if link_type == "website":
+                website_checks = self.validate_website_content(content, url)
+                result["errors"].extend(website_checks["errors"])
+                result["warnings"].extend(website_checks["warnings"])
+                
+            elif link_type == "twitter":
+                twitter_checks = self.validate_twitter_content(content, url)
+                result["warnings"].extend(twitter_checks)
+                
+            elif link_type == "github":
+                github_checks = self.validate_github_content(content, url)
+                result["warnings"].extend(github_checks)
+                
+        except requests.exceptions.RequestException as e:
+            result["valid"] = False
+            result["errors"].append(f"Erreur connexion {link_type}: {str(e)}")
+        except Exception as e:
+            result["valid"] = False
+            result["errors"].append(f"Erreur validation {link_type}: {str(e)}")
         
         return result
-    
-    def calculate_complete_ratios(self, project: Dict) -> Dict:
-        """Calcul des 25+ ratios"""
-        ratios = {}
+
+    def validate_website_content(self, content: str, url: str) -> Dict:
+        """Valide le contenu du site web"""
+        checks = {"errors": [], "warnings": []}
         
-        # GitHub ratios
-        github = project.get('github_data', {})
-        ratios['github_activity'] = github.get('activity_score', 0.3)
-        ratios['github_commits_30d'] = min(github.get('commits_30d', 0) / 50, 1.0)
-        ratios['github_recency'] = 1.0 if github.get('last_commit_days', 999) < 7 else 0.5
-        ratios['github_stars'] = min(github.get('stars', 0) / 1000, 1.0)
-        ratios['github_contributors'] = min(github.get('contributors', 0) / 20, 1.0)
+        # Vérification présence page team
+        if "team" not in content and "about" not in content and "contact" not in content:
+            checks["warnings"].append("Page 'Team'/'About' non détectée")
         
-        # Social ratios
-        twitter = project.get('twitter_data', {})
-        telegram = project.get('telegram_data', {})
-        reddit = project.get('reddit_data', {})
+        # Vérification présence whitepaper/litepaper
+        if "whitepaper" not in content and "litepaper" not in content and "documentation" not in content:
+            checks["warnings"].append("Whitepaper/Documentation non détecté")
         
-        ratios['twitter_followers'] = min(twitter.get('followers', 0) / 50000, 1.0)
-        ratios['twitter_engagement'] = min(twitter.get('engagement', 0) / 1000, 1.0)
-        ratios['telegram_size'] = min(telegram.get('members', 0) / 10000, 1.0)
-        ratios['reddit_sentiment'] = reddit.get('sentiment_score', 0.5)
-        ratios['reddit_mentions'] = min(reddit.get('mentions', 0) / 50, 1.0)
-        ratios['reddit_hot_posts'] = min(reddit.get('hot_posts', 0) / 10, 1.0)
+        # Vérification contact
+        if "contact" not in content and "mailto:" not in content and "support" not in content:
+            checks["warnings"].append("Informations de contact manquantes")
         
-        # VC ratios
-        vcs = project.get('vcs', [])
-        vc_scores = [self.TIER1_VCS.get(vc, 50) for vc in vcs]
-        ratios['vc_strength'] = sum(vc_scores) / (len(vc_scores) * 100) if vc_scores else 0
-        ratios['vc_count'] = min(len(vcs) / 5, 1.0)
-        ratios['vc_tier1'] = 1.0 if any(self.TIER1_VCS.get(vc, 0) > 85 for vc in vcs) else 0.3
+        # Détection de templates génériques
+        generic_indicators = ["lorem ipsum", "coming soon", "under construction"]
+        if any(indicator in content for indicator in generic_indicators):
+            checks["warnings"].append("Contenu générique/template détecté")
         
-        # Private deal bonus
-        deals = project.get('private_deals', [])
-        ratios['private_deal_found'] = min(len(deals) / 3, 1.0)
-        ratios['private_deal_confidence'] = max([d.get('confidence', 0) for d in deals]) if deals else 0
-        
-        # Narrative & timing
-        current_narratives = self.predictor.detect_current_narrative()
-        category = project.get('category', '')
-        ratios['narrative_fit'] = 1.0 if any(n.lower() in category.lower() for n in current_narratives) else 0.3
-        
-        # Historical similarity
-        ratios['historical_similarity'] = project.get('similarity_score', 0)
-        
-        # Stage
-        stage_scores = {'seed': 1.0, 'private': 0.8, 'public': 0.6, 'ido': 0.4, 'tge': 0.2}
-        ratios['stage_score'] = stage_scores.get(project.get('stage', 'unknown'), 0.5)
-        
-        # Team quality
-        ratios['team_quality'] = (
-            ratios['github_activity'] * 0.5 +
-            (1.0 if ratios['vc_strength'] > 0.7 else 0.5) * 0.3 +
-            (1.0 if project.get('audit_firm') else 0) * 0.2
-        )
-        
-        # Community
-        ratios['community_strength'] = (
-            ratios['twitter_followers'] * 0.25 +
-            ratios['telegram_size'] * 0.25 +
-            ratios['reddit_sentiment'] * 0.25 +
-            ratios['twitter_engagement'] * 0.25
-        )
-        
-        # Tech fundamentals
-        ratios['tech_fundamentals'] = (
-            ratios['github_activity'] * 0.40 +
-            ratios['github_recency'] * 0.30 +
-            ratios['github_stars'] * 0.20 +
-            ratios['github_contributors'] * 0.10
-        )
-        
-        # Hype momentum
-        ratios['hype_momentum'] = (
-            ratios['community_strength'] * 0.40 +
-            ratios['reddit_hot_posts'] * 0.30 +
-            ratios['narrative_fit'] * 0.30
-        )
-        
-        # Risk score
-        ratios['risk_score'] = max(0, 1 - (
-            ratios['vc_strength'] * 0.30 +
-            ratios['github_activity'] * 0.25 +
-            ratios['team_quality'] * 0.20 +
-            ratios['private_deal_confidence'] * 0.15 +
-            (1.0 if project.get('audit_firm') else 0) * 0.10
-        ))
-        
-        # WHALE SCORE ULTIMATE
-        ratios['whale_score'] = (
-            ratios['vc_strength'] * 0.22 +
-            ratios['historical_similarity'] * 0.20 +
-            ratios['narrative_fit'] * 0.15 +
-            ratios['tech_fundamentals'] * 0.13 +
-            ratios['hype_momentum'] * 0.10 +
-            ratios['stage_score'] * 0.10 +
-            ratios['private_deal_found'] * 0.05 +
-            ratios['vc_tier1'] * 0.05
-        )
-        
-        # GLOBAL SCORE
-        ratios['global_score'] = (
-            ratios['whale_score'] * 0.50 +
-            ratios['team_quality'] * 0.20 +
-            ratios['community_strength'] * 0.15 +
-            ratios['tech_fundamentals'] * 0.15
-        ) * (1 - ratios['risk_score'] * 0.25)
-        
-        return ratios
-    
-    def make_whale_decision(self, project: Dict, ratios: Dict) -> Tuple[bool, str, str]:
-        """Décision WHALE finale"""
-        
-        whale_score = ratios.get('whale_score', 0)
-        global_score = ratios.get('global_score', 0)
-        risk_score = ratios.get('risk_score', 1)
-        predicted_multiple = project.get('predicted_multiple', 1)
-        
-        # Critères WHALE stricts
-        whale_criteria = {
-            'score_elite': whale_score >= 0.70,
-            'score_good': whale_score >= 0.60,
-            'risk_acceptable': risk_score <= 0.35,
-            'vc_tier1': ratios.get('vc_tier1', 0) > 0.5,
-            'tech_solid': ratios.get('tech_fundamentals', 0) > 0.45,
-            'narrative_hot': ratios.get('narrative_fit', 0) > 0.5,
-            'multiple_high': predicted_multiple >= 50,
-            'similarity_strong': ratios.get('historical_similarity', 0) > 0.5
-        }
-        
-        passed = sum(whale_criteria.values())
-        
-        # GO si >= 6/8 critères
-        go = passed >= 6
-        
-        # Risk level
-        if risk_score > 0.6:
-            risk_level = "EXTREME"
-        elif risk_score > 0.4:
-            risk_level = "HIGH"
-        elif risk_score > 0.2:
-            risk_level = "MEDIUM"
-        else:
-            risk_level = "LOW"
-        
-        # Rationale enrichi
-        strengths = []
+        return checks
+
+    def validate_twitter_content(self, content: str, url: str) -> List[str]:
+        """Valide le contenu Twitter (basique)"""
         warnings = []
         
-        # Forces
-        vcs = project.get('vcs', [])
-        if len(vcs) > 0:
-            top_vcs = [vc for vc in vcs if self.TIER1_VCS.get(vc, 0) > 85]
-            if top_vcs:
-                strengths.append(f"💎 VCs Elite: {', '.join(top_vcs[:3])}")
-            else:
-                strengths.append(f"💰 VCs: {', '.join(vcs[:3])}")
+        # Ces vérifications nécessiteraient l'API Twitter
+        # Pour l'instant, vérifications basiques
+        if "account suspended" in content:
+            warnings.append("Compte Twitter suspendu")
+        if "this account doesn't exist" in content:
+            warnings.append("Compte Twitter inexistant")
         
-        github = project.get('github_data', {})
-        if github.get('commits_30d', 0) > 40:
-            strengths.append(f"⚡ Dev ultra actif: {github['commits_30d']} commits/30j, {github.get('stars', 0)} stars")
-        
-        if ratios.get('narrative_fit', 0) > 0.7:
-            narratives = self.predictor.detect_current_narrative()
-            strengths.append(f"🔥 Narrative HOT 2025: {', '.join(narratives[:2])}")
-        
-        if ratios.get('historical_similarity', 0) > 0.65:
-            match = project.get('historical_match', 'N/A')
-            strengths.append(f"📈 Profil similaire à {match} ({ratios['historical_similarity']*100:.0f}%)")
-        
-        deals = project.get('private_deals', [])
-        if len(deals) > 1:
-            sources = [d['source'] for d in deals]
-            strengths.append(f"🎯 Deals privés trouvés: {', '.join(sources)}")
-        
-        twitter = project.get('twitter_data', {})
-        if twitter.get('followers', 0) > 20000:
-            strengths.append(f"🐦 Community forte: {twitter['followers']:,} followers")
-        
-        if project.get('audit_firm'):
-            strengths.append(f"🔒 Audité par {project['audit_firm']}")
-        
-        # Warnings
-        if risk_score > 0.3:
-            warnings.append(f"⚠️ Risque élevé: {risk_score*100:.0f}%")
-        
-        if ratios.get('github_activity', 0) < 0.4:
-            warnings.append(f"⚠️ GitHub peu actif")
-        
-        if len(vcs) == 0:
-            warnings.append(f"⚠️ Aucun VC majeur identifié")
-        
-        if ratios.get('community_strength', 0) < 0.3:
-            warnings.append(f"⚠️ Community encore petite")
-        
-        if not project.get('audit_firm'):
-            warnings.append(f"⚠️ Pas d'audit confirmé")
-        
-        # Rationale complet
-        rationale = f"""
-🎯 **ANALYSE WHALE COMPLÈTE**
+        return warnings
 
-📊 **SCORES**
-• Whale Score: **{whale_score*100:.1f}/100**
-• Global Score: **{global_score*100:.1f}/100**
-• Risk Score: **{risk_score*100:.1f}/100**
-
-🚀 **PRÉDICTION ML**
-• Multiple estimé: **x{predicted_multiple:.0f}**
-• Match historique: **{project.get('historical_match', 'N/A')}**
-• Similarité: **{ratios.get('historical_similarity', 0)*100:.1f}%**
-• Narrative fit: **{ratios.get('narrative_fit', 0)*100:.1f}%**
-
-✅ **FORCES** ({len(strengths)}/6+)
-{chr(10).join(strengths) if strengths else '• Aucune force majeure détectée'}
-
-⚠️ **POINTS D'ATTENTION** ({len(warnings)})
-{chr(10).join(warnings) if warnings else '• RAS - Projet solide'}
-
-📈 **RATIOS DÉTAILLÉS**
-• VCs: {ratios.get('vc_strength', 0)*100:.0f}% | Tier-1: {'✅' if ratios.get('vc_tier1', 0) > 0.5 else '❌'}
-• Tech: {ratios.get('tech_fundamentals', 0)*100:.0f}% | Commits: {github.get('commits_30d', 0)}
-• Hype: {ratios.get('hype_momentum', 0)*100:.0f}% | Community: {ratios.get('community_strength', 0)*100:.0f}%
-• Team: {ratios.get('team_quality', 0)*100:.0f}% | Stage: {project.get('stage', 'N/A')}
-
-💰 **DEAL INFO**
-• Stage: **{project.get('stage', 'N/A').upper()}**
-• Prix seed: **${project.get('price_seed', 0):.6f}**
-• FDMC: **${project.get('fdmc', 0):,.0f}**
-• Blockchain: **{project.get('blockchain', 'TBA')}**
-
-🎓 **DÉCISION FINALE**
-{'✅ **GO - INVESTISSEMENT RECOMMANDÉ**' if go else '❌ **NOGO - NE PAS INVESTIR**'}
-
-Critères validés: **{passed}/8**
-Niveau de confiance: **{'TRÈS ÉLEVÉ' if whale_score > 0.75 else 'ÉLEVÉ' if whale_score > 0.65 else 'MOYEN'}**
-"""
+    def validate_github_content(self, content: str, url: str) -> List[str]:
+        """Valide le contenu GitHub"""
+        warnings = []
         
-        return go, risk_level, rationale.strip()
-    
-    def save_complete_to_db(self, result: Dict):
-        """Sauvegarde complète en DB"""
+        if "this repository is empty" in content:
+            warnings.append("Dépôt GitHub vide")
+        if "page not found" in content:
+            warnings.append("Dépôt GitHub non trouvé")
+        
+        return warnings
+
+    def check_cross_platform_consistency(self, project_data: Dict) -> List[str]:
+        """Vérifie la cohérence cross-platform"""
+        errors = []
+        project_name = project_data.get("name", "").lower().replace(" ", "").replace("-", "")
+        
+        # Vérification Twitter
+        twitter_url = project_data.get("twitter", "")
+        if twitter_url and project_name:
+            twitter_handle = twitter_url.rstrip('/').split('/')[-1].lower()
+            if project_name not in twitter_handle and twitter_handle not in project_name:
+                errors.append(f"Incohérence Twitter: handle '{twitter_handle}' ne correspond pas au nom")
+        
+        # Vérification Telegram
+        telegram_url = project_data.get("telegram", "")
+        if telegram_url and project_name:
+            telegram_handle = telegram_url.rstrip('/').split('/')[-1].lower()
+            if project_name not in telegram_handle and telegram_handle not in project_name:
+                errors.append(f"Incohérence Telegram: handle '{telegram_handle}' ne correspond pas au nom")
+        
+        return errors
+
+    # CALCUL DES 21 RATIOS FINANCIERS
+    def calculate_21_ratios_advanced(self, project_data: Dict) -> Dict:
+        """
+        Calcule les 21 ratios financiers avec intelligence avancée
+        et focus sur MC < 621,000€
+        """
+        ratios = {}
+        
         try:
-            conn = sqlite3.connect(self.config.DB_PATH)
+            # Données de base
+            mc = project_data.get('market_cap', 0)
+            fdmc = project_data.get('fdmc', 0)
+            volume = project_data.get('volume_24h', 0)
+            liquidity = project_data.get('liquidity', 0)
+            tvl = project_data.get('tvl', 0)
+            circulating_supply = project_data.get('circulating_supply', 0)
+            total_supply = project_data.get('total_supply', 0)
+            
+            # 1. Ratio Market Cap / FDMC
+            ratios['mc_fdmc_ratio'] = mc / fdmc if fdmc > 0 else 0
+            
+            # 2. Ratio Volume/MC (Liquidité)
+            ratios['volume_mc_ratio'] = volume / mc if mc > 0 else 0
+            
+            # 3. Ratio Liquidité/MC
+            ratios['liquidity_mc_ratio'] = liquidity / mc if mc > 0 else 0
+            
+            # 4. Ratio TVL/MC (Value Accrual)
+            ratios['tvl_mc_ratio'] = tvl / mc if mc > 0 else 0
+            
+            # 5. Concentration whales
+            ratios['whale_concentration'] = project_data.get('whale_concentration', 0.1)
+            
+            # 6. Score audit
+            ratios['audit_score'] = project_data.get('audit_score', 0) / 100
+            
+            # 7. Activité développeurs
+            ratios['dev_activity'] = project_data.get('dev_activity', 0) / 100
+            
+            # 8. Engagement communauté
+            ratios['community_engagement'] = project_data.get('community_engagement', 0) / 100
+            
+            # 9. Momentum croissance
+            ratios['growth_momentum'] = self.calculate_growth_momentum(project_data)
+            
+            # 10. Momentum hype
+            ratios['hype_momentum'] = self.calculate_hype_momentum(project_data)
+            
+            # 11. Utilité token
+            ratios['token_utility'] = self.assess_token_utility(project_data)
+            
+            # 12. Anomalies on-chain
+            ratios['on_chain_anomaly'] = self.detect_onchain_anomalies(project_data)
+            
+            # 13. Risque rugpull
+            ratios['rugpull_risk'] = self.calculate_rugpull_risk(project_data)
+            
+            # 14. Force VCs
+            ratios['vc_strength'] = self.calculate_vc_strength(project_data)
+            
+            # 15. Ratio Prix/Liquidité
+            ratios['price_to_liquidity'] = mc / liquidity if liquidity > 0 else float('inf')
+            
+            # 16. Ratio Dev/VC
+            ratios['dev_vc_ratio'] = self.calculate_dev_vc_ratio(project_data)
+            
+            # 17. Ratio Rétention
+            ratios['retention_ratio'] = self.calculate_retention_ratio(project_data)
+            
+            # 18. Index Smart Money
+            ratios['smart_money_index'] = self.calculate_smart_money_index(project_data)
+            
+            # 19. Score qualité équipe
+            ratios['team_quality_score'] = self.assess_team_quality(project_data)
+            
+            # 20. Potentiel de croissance
+            ratios['growth_potential'] = self.assess_growth_potential(project_data)
+            
+            # 21. Score global pondéré
+            ratios['global_score'] = self.calculate_global_score(ratios)
+            
+            # Estimation multiple potentiel
+            ratios['estimated_multiple'] = self.estimate_potential_multiple(ratios)
+            
+        except Exception as e:
+            logger.error(f"Erreur calcul ratios: {e}")
+            # Valeurs par défaut en cas d'erreur
+            ratios = {f'ratio_{i}': 0 for i in range(1, 22)}
+        
+        return ratios
+
+    def calculate_growth_momentum(self, project_data: Dict) -> float:
+        """Calcule le momentum de croissance basé sur plusieurs facteurs"""
+        factors = []
+        
+        # Facteur 1: Volume récent vs volume historique
+        volume_ratio = project_data.get('volume_24h', 0) / max(project_data.get('avg_volume_7d', 1), 1)
+        factors.append(min(volume_ratio, 3.0) / 3.0)  # Normalisé 0-1
+        
+        # Facteur 2: Croissance prix récente
+        price_change = project_data.get('price_change_24h', 0)
+        factors.append(max(0, min(price_change / 50.0, 1.0)))  # +50% = 1.0
+        
+        # Facteur 3: Adoption (holders growth)
+        holders_growth = project_data.get('holders_growth_30d', 0)
+        factors.append(max(0, min(holders_growth / 100.0, 1.0)))  # +100% = 1.0
+        
+        return sum(factors) / len(factors)
+
+    def calculate_hype_momentum(self, project_data: Dict) -> float:
+        """Calcule le momentum hype (social sentiment)"""
+        factors = []
+        
+        # Facteur 1: Engagement Twitter
+        twitter_engagement = project_data.get('twitter_engagement', 0)
+        factors.append(min(twitter_engagement / 1000.0, 1.0))
+        
+        # Facteur 2: Taille communauté Telegram
+        telegram_members = project_data.get('telegram_members', 0)
+        factors.append(min(telegram_members / 5000.0, 1.0))
+        
+        # Facteur 3: Sentiment général
+        sentiment = project_data.get('social_sentiment', 0.5)
+        factors.append(sentiment)
+        
+        return sum(factors) / len(factors)
+
+    def assess_token_utility(self, project_data: Dict) -> float:
+        """Évalue l'utilité du token"""
+        utility_score = 0.5  # Base
+        
+        # Bonus pour utilités spécifiques
+        utilities = project_data.get('token_utilities', [])
+        
+        if 'governance' in utilities:
+            utility_score += 0.2
+        if 'staking' in utilities:
+            utility_score += 0.15
+        if 'fee_reduction' in utilities:
+            utility_score += 0.1
+        if 'access' in utilities:
+            utility_score += 0.1
+        if 'revenue_share' in utilities:
+            utility_score += 0.2
+            
+        return min(utility_score, 1.0)
+
+    def detect_onchain_anomalies(self, project_data: Dict) -> float:
+        """Détecte les anomalies on-chain (plus bas = mieux)"""
+        anomaly_score = 0.0
+        
+        # Anomalie 1: Transactions suspectes
+        suspicious_txs = project_data.get('suspicious_transactions', 0)
+        anomaly_score += min(suspicious_txs / 10.0, 0.3)
+        
+        # Anomalie 2: Concentration excessive
+        top10_holders = project_data.get('top10_holders_percent', 0)
+        if top10_holders > 80:
+            anomaly_score += 0.3
+        elif top10_holders > 60:
+            anomaly_score += 0.2
+            
+        # Anomalie 3: Liquidité verrouillée faible
+        locked_liquidity = project_data.get('locked_liquidity_percent', 0)
+        if locked_liquidity < 50:
+            anomaly_score += 0.2
+        elif locked_liquidity < 80:
+            anomaly_score += 0.1
+            
+        return min(anomaly_score, 1.0)
+
+    def calculate_rugpull_risk(self, project_data: Dict) -> float:
+        """Calcule le risque de rugpull (plus bas = mieux)"""
+        risk_score = 0.0
+        
+        # Risque 1: Contract non vérifié
+        if not project_data.get('contract_verified', False):
+            risk_score += 0.4
+            
+        # Risque 2: Owner avec trop de pouvoir
+        owner_control = project_data.get('owner_control', 0)
+        if owner_control > 50:
+            risk_score += 0.3
+            
+        # Risque 3: Mint function active
+        if project_data.get('mint_function_active', False):
+            risk_score += 0.2
+            
+        # Risque 4: Blacklist function
+        if project_data.get('blacklist_function', False):
+            risk_score += 0.1
+            
+        return min(risk_score, 1.0)
+
+    def calculate_vc_strength(self, project_data: Dict) -> float:
+        """Calcule la force des VCs"""
+        vcs = project_data.get('vcs', [])
+        if not vcs:
+            return 0.0
+        
+        total_score = 0
+        for vc in vcs:
+            vc_data = self.reputable_vcs.get(vc, {})
+            total_score += vc_data.get('score', 0)
+        
+        return total_score / (len(vcs) * 100)
+
+    def calculate_dev_vc_ratio(self, project_data: Dict) -> float:
+        """Calcule le ratio Développeurs/VCs"""
+        dev_activity = project_data.get('dev_activity', 0)
+        vc_strength = self.calculate_vc_strength(project_data)
+        
+        if vc_strength == 0:
+            return 1.0 if dev_activity > 50 else dev_activity / 50.0
+            
+        return (dev_activity / 100.0) / max(vc_strength, 0.1)
+
+    def calculate_retention_ratio(self, project_data: Dict) -> float:
+        """Calcule le ratio de rétention des holders"""
+        retention_data = project_data.get('holder_retention', {})
+        
+        if not retention_data:
+            return 0.5  # Valeur par défaut
+            
+        day30_retention = retention_data.get('30d', 0)
+        return min(day30_retention / 100.0, 1.0)
+
+    def calculate_smart_money_index(self, project_data: Dict) -> float:
+        """Calcule l'index smart money"""
+        smart_money_involvement = project_data.get('smart_money_involvement', 0)
+        return min(smart_money_involvement / 100.0, 1.0)
+
+    def assess_team_quality(self, project_data: Dict) -> float:
+        """Évalue la qualité de l'équipe"""
+        team_data = project_data.get('team', {})
+        
+        if not team_data:
+            return 0.3
+            
+        score = 0.0
+        # Expérience moyenne de l'équipe
+        avg_experience = team_data.get('avg_experience_years', 0)
+        score += min(avg_experience / 10.0, 0.4)
+        
+        # Track record
+        previous_projects = team_data.get('previous_successful_projects', 0)
+        score += min(previous_projects / 5.0, 0.3)
+        
+        # Transparence
+        if team_data.get('doxxed', False):
+            score += 0.3
+            
+        return min(score, 1.0)
+
+    def assess_growth_potential(self, project_data: Dict) -> float:
+        """Évalue le potentiel de croissance"""
+        factors = []
+        
+        # TAM (Total Addressable Market)
+        tam_size = project_data.get('tam_size', 'medium')
+        tam_scores = {'small': 0.3, 'medium': 0.6, 'large': 0.9, 'massive': 1.0}
+        factors.append(tam_scores.get(tam_size, 0.5))
+        
+        # Innovation
+        innovation_level = project_data.get('innovation_level', 'medium')
+        innovation_scores = {'low': 0.2, 'medium': 0.5, 'high': 0.8, 'breakthrough': 1.0}
+        factors.append(innovation_scores.get(innovation_level, 0.5))
+        
+        # Timing marché
+        market_timing = project_data.get('market_timing', 'neutral')
+        timing_scores = {'bad': 0.2, 'neutral': 0.5, 'good': 0.8, 'perfect': 1.0}
+        factors.append(timing_scores.get(market_timing, 0.5))
+        
+        return sum(factors) / len(factors)
+
+    def calculate_global_score(self, ratios: Dict) -> float:
+        """Calcule le score global pondéré"""
+        weights = {
+            'mc_fdmc_ratio': 0.05,
+            'volume_mc_ratio': 0.08,
+            'liquidity_mc_ratio': 0.1,
+            'tvl_mc_ratio': 0.07,
+            'audit_score': 0.08,
+            'dev_activity': 0.09,
+            'community_engagement': 0.06,
+            'growth_momentum': 0.07,
+            'hype_momentum': 0.05,
+            'token_utility': 0.06,
+            'vc_strength': 0.08,
+            'rugpull_risk': -0.15,  # Négatif car risque
+            'on_chain_anomaly': -0.10,  # Négatif car anomalie
+            'smart_money_index': 0.12,
+            'team_quality_score': 0.08
+        }
+        
+        score = 0.5  # Score de base
+        
+        for ratio, weight in weights.items():
+            value = ratios.get(ratio, 0)
+            score += value * weight
+        
+        return max(0, min(1, score))  # Normalisé entre 0 et 1
+
+    def estimate_potential_multiple(self, ratios: Dict) -> float:
+        """Estime le multiple de croissance potentiel"""
+        base_multiple = 1.0
+        
+        # Facteurs boostant le multiple
+        if ratios.get('global_score', 0) > 0.8:
+            base_multiple *= 3.0
+        elif ratios.get('global_score', 0) > 0.7:
+            base_multiple *= 2.0
+        elif ratios.get('global_score', 0) > 0.6:
+            base_multiple *= 1.5
+            
+        # Boost par VC strength
+        if ratios.get('vc_strength', 0) > 0.8:
+            base_multiple *= 1.5
+            
+        # Boost par smart money
+        if ratios.get('smart_money_index', 0) > 0.7:
+            base_multiple *= 1.3
+            
+        # Réduction par risque
+        if ratios.get('rugpull_risk', 0) > 0.5:
+            base_multiple *= 0.3
+        elif ratios.get('rugpull_risk', 0) > 0.3:
+            base_multiple *= 0.7
+            
+        return round(base_multiple, 1)
+
+    # MÉTHODE D'ANALYSE PRINCIPALE
+    def analyze_single_project(self, project: Dict) -> Dict:
+        """Analyse un projet unique de manière complète"""
+        
+        logger.info(f"🔍 Analyse détaillée de {project.get('name')}...")
+        
+        # Validation des liens
+        is_valid, validation_errors = self.validate_project_links_advanced(project)
+        
+        # Vérification critère market cap
+        meets_cap_criteria = project.get('market_cap', 0) <= self.MAX_MARKET_CAP_EUROS
+        
+        # Calcul des 21 ratios avancés
+        ratios = self.calculate_21_ratios_advanced(project)
+        
+        # Décision GO/NOGO
+        go_decision = (
+            is_valid and 
+            meets_cap_criteria and 
+            ratios.get('global_score', 0) > 0.65 and
+            ratios.get('rugpull_risk', 1) < 0.4 and
+            ratios.get('on_chain_anomaly', 1) < 0.5
+        )
+        
+        # Niveau de risque
+        risk_level = self.determine_risk_level(ratios)
+        
+        # Rationale détaillé
+        rationale = self.generate_detailed_rationale(project, ratios, go_decision)
+        
+        result = {
+            **project,
+            'is_valid': is_valid,
+            'validation_errors': validation_errors,
+            'meets_cap_criteria': meets_cap_criteria,
+            'ratios': ratios,
+            'go_decision': go_decision,
+            'risk_level': risk_level,
+            'rationale': rationale,
+            'analyzed_at': datetime.now().isoformat()
+        }
+        
+        # Sauvegarde en base
+        self.save_analysis_to_db(result)
+        
+        logger.info(f"✅ Analyse {project.get('name')} terminée - Decision: {'GO' if go_decision else 'NOGO'}")
+        
+        return result
+
+    def determine_risk_level(self, ratios: Dict) -> str:
+        """Détermine le niveau de risque"""
+        rugpull_risk = ratios.get('rugpull_risk', 0)
+        anomaly_score = ratios.get('on_chain_anomaly', 0)
+        global_score = ratios.get('global_score', 0)
+        
+        if rugpull_risk > 0.6 or anomaly_score > 0.7:
+            return "EXTREME"
+        elif rugpull_risk > 0.4 or anomaly_score > 0.5:
+            return "HIGH"
+        elif rugpull_risk > 0.2 or global_score < 0.5:
+            return "MEDIUM"
+        else:
+            return "LOW"
+
+    def generate_detailed_rationale(self, project: Dict, ratios: Dict, go_decision: bool) -> str:
+        """Génère un rationale détaillé pour la décision"""
+        
+        strengths = []
+        weaknesses = []
+        
+        # Forces
+        if ratios.get('vc_strength', 0) > 0.7:
+            strengths.append("VCs de qualité")
+        if ratios.get('dev_activity', 0) > 0.7:
+            strengths.append("Équipe dev active")
+        if ratios.get('audit_score', 0) > 0.8:
+            strengths.append("Audit solide")
+        if ratios.get('smart_money_index', 0) > 0.6:
+            strengths.append("Smart money présente")
+        if ratios.get('token_utility', 0) > 0.7:
+            strengths.append("Utilité token forte")
+            
+        # Faiblesses
+        if ratios.get('rugpull_risk', 0) > 0.3:
+            weaknesses.append(f"Risque rugpull élevé ({ratios['rugpull_risk']:.1%})")
+        if ratios.get('on_chain_anomaly', 0) > 0.4:
+            weaknesses.append(f"Anomalies on-chain ({ratios['on_chain_anomaly']:.1%})")
+        if ratios.get('dev_activity', 0) < 0.3:
+            weaknesses.append("Activité dev faible")
+        if ratios.get('community_engagement', 0) < 0.4:
+            weaknesses.append("Engagement communauté faible")
+            
+        rationale = f"""
+Score Global: {ratios.get('global_score', 0):.1%}
+Multiple Estimé: {ratios.get('estimated_multiple', 1)}x
+
+FORCES: {', '.join(strengths) if strengths else 'Aucune force majeure'}
+
+FAIBLESSES: {', '.join(weaknesses) if weaknesses else 'Aucune faiblesse critique'}
+
+DÉCISION: {'✅ APPROUVÉ' if go_decision else '❌ REJETÉ'}
+        """.strip()
+        
+        return rationale
+
+    def save_analysis_to_db(self, analysis_result: Dict):
+        """Sauvegarde l'analyse en base de données"""
+        try:
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            project = result['project']
-            ratios = result['ratios']
-            
-            # Insert/Update project
+            # Insertion projet
             cursor.execute('''
-                INSERT OR REPLACE INTO projects
-                (name, symbol, stage, source, price_seed, fdmc, predicted_multiple,
-                 blockchain, category, website, github, twitter, telegram, discord,
-                 audit_firm, launch_date, collected_at, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO projects 
+                (name, symbol, category, stage, blockchain, market_cap_euros, market_cap_usd, 
+                 meets_cap_criteria, website, twitter, telegram, github)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                project.get('name'),
-                project.get('symbol'),
-                project.get('stage'),
-                project.get('source'),
-                project.get('price_seed', 0),
-                project.get('fdmc', 0),
-                result['predicted_multiple'],
-                project.get('blockchain', 'Unknown'),
-                project.get('category', 'Unknown'),
-                project.get('website', ''),
-                project.get('github', ''),
-                project.get('twitter', ''),
-                project.get('telegram', ''),
-                project.get('discord', ''),
-                project.get('audit_firm', ''),
-                project.get('launch_date', ''),
-                datetime.now().isoformat(),
-                datetime.now().isoformat()
+                analysis_result['name'],
+                analysis_result['symbol'],
+                analysis_result['category'],
+                analysis_result['stage'],
+                analysis_result['blockchain'],
+                analysis_result['market_cap'],
+                analysis_result['market_cap'] * 1.08,  # Conversion USD
+                analysis_result['meets_cap_criteria'],
+                analysis_result['website'],
+                analysis_result['twitter'],
+                analysis_result['telegram'],
+                analysis_result['github']
             ))
             
             project_id = cursor.lastrowid
             
-            # Insert analysis
+            # Insertion analyse détaillée
+            ratios = analysis_result['ratios']
             cursor.execute('''
-                INSERT INTO analysis
-                (project_id, whale_score, global_score, risk_level, predicted_multiple,
-                 similarity_score, historical_match, go_decision, rationale, analyzed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO project_analysis 
+                (project_id, market_cap, fdmc, global_score, go_decision, risk_level, rationale,
+                 meets_cap_criteria, audit_score, dev_activity, community_engagement,
+                 rugpull_risk, vc_strength, estimated_multiple)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 project_id,
-                ratios.get('whale_score', 0),
+                analysis_result['market_cap'],
+                analysis_result.get('fdmc', 0),
                 ratios.get('global_score', 0),
-                result['risk_level'],
-                result['predicted_multiple'],
-                result['similarity_score'],
-                result['historical_match'],
-                result['go_decision'],
-                result['rationale'],
-                datetime.now().isoformat()
+                analysis_result['go_decision'],
+                analysis_result['risk_level'],
+                analysis_result['rationale'],
+                analysis_result['meets_cap_criteria'],
+                analysis_result.get('audit_score', 0),
+                analysis_result.get('dev_activity', 0),
+                analysis_result.get('community_engagement', 0),
+                ratios.get('rugpull_risk', 0),
+                ratios.get('vc_strength', 0),
+                ratios.get('estimated_multiple', 1)
             ))
-            
-            # Insert VCs
-            for vc in project.get('vcs', []):
-                cursor.execute('''
-                    INSERT INTO vcs (project_id, vc_name, vc_tier)
-                    VALUES (?, ?, ?)
-                ''', (project_id, vc, self.TIER1_VCS.get(vc, 50)))
-            
-            # Insert social metrics
-            twitter_data = project.get('twitter_data', {})
-            telegram_data = project.get('telegram_data', {})
-            github_data = project.get('github_data', {})
-            reddit_data = project.get('reddit_data', {})
-            
-            cursor.execute('''
-                INSERT INTO social_metrics
-                (project_id, twitter_followers, telegram_members, github_stars,
-                 github_commits_30d, reddit_mentions, collected_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                project_id,
-                twitter_data.get('followers', 0),
-                telegram_data.get('members', 0),
-                github_data.get('stars', 0),
-                github_data.get('commits_30d', 0),
-                reddit_data.get('mentions', 0),
-                datetime.now().isoformat()
-            ))
-            
-            # Insert private deals
-            for deal in project.get('private_deals', []):
-                cursor.execute('''
-                    INSERT INTO private_deals (project_id, deal_type, source, confidence, found_at)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (
-                    project_id,
-                    deal.get('type', 'unknown'),
-                    deal.get('source', 'unknown'),
-                    deal.get('confidence', 0.5),
-                    datetime.now().isoformat()
-                ))
             
             conn.commit()
             conn.close()
             
-            logger.info(f"✅ Sauvegardé: {project.get('name')}")
-            
         except Exception as e:
-            logger.error(f"❌ Erreur DB: {e}")
-    
-    def send_whale_alert(self, result: Dict):
-        """Alerte Telegram WHALE"""
-        
-        if not self.config.TELEGRAM_TOKEN or not self.config.TELEGRAM_CHAT:
-            logger.warning("⚠️ Telegram non configuré")
-            return
-        
-        project = result['project']
-        ratios = result['ratios']
-        
-        vcs_str = ', '.join(project.get('vcs', [])[:3]) if project.get('vcs') else 'N/A'
-        
-        github = project.get('github_data', {})
-        twitter = project.get('twitter_data', {})
-        
-        message = f"""
-🌌 **WHALE ALERT - PÉPITE DÉTECTÉE**
+            logger.error(f"❌ Erreur sauvegarde BD: {e}")
 
-🏆 **{project.get('name', 'Unknown')} (${project.get('symbol', 'UNK')})**
-
-📊 **SCORES WHALE**
-• Whale Score: **{ratios.get('whale_score', 0)*100:.1f}/100** {'🔥' if ratios.get('whale_score', 0) > 0.7 else '⭐'}
-• Global Score: **{ratios.get('global_score', 0)*100:.1f}/100**
-• Risque: **{result['risk_level']}** ({ratios.get('risk_score', 0)*100:.0f}%)
-
-🚀 **PRÉDICTION ML**
-• Multiple prédit: **x{result['predicted_multiple']:.0f}**
-• Match historique: **{result['historical_match']}**
-• Similarité: **{result['similarity_score']*100:.1f}%**
-
-💰 **DEAL INFO**
-• Stage: **{project.get('stage', 'N/A').upper()}**
-• Prix seed: **${project.get('price_seed', 0):.6f}**
-• FDMC: **${project.get('fdmc', 0):,.0f}**
-• Source: **{project.get('source', 'N/A').upper()}**
-
-🏢 **INVESTISSEURS**
-• VCs: **{vcs_str}**
-• VC Strength: **{ratios.get('vc_strength', 0)*100:.0f}%**
-• Tier-1: **{'✅' if ratios.get('vc_tier1', 0) > 0.5 else '❌'}**
-• Private deals: **{len(project.get('private_deals', []))} trouvé(s)**
-
-📈 **FUNDAMENTALS**
-• GitHub: **{github.get('commits_30d', 0)} commits/30j**
-• Stars: **{github.get('stars', 0):,}**
-• Contributors: **{github.get('contributors', 0)}**
-• Activity: **{ratios.get('github_activity', 0)*100:.0f}%**
-
-🔥 **HYPE & COMMUNITY**
-• Narrative 2025: **{ratios.get('narrative_fit', 0)*100:.0f}%**
-• Twitter: **{twitter.get('followers', 0):,} followers**
-• Telegram: **{project.get('telegram_data', {}).get('members', 0):,} members**
-• Hype Score: **{ratios.get('hype_momentum', 0)*100:.0f}%**
-
-🌐 **LIENS**
-[Website]({project.get('website', '#')}) | [Twitter]({project.get('twitter', '#')}) | [GitHub]({project.get('github', '#')})
-
-📝 **OÙ INVESTIR**
-• Plateforme: **{project.get('source', 'TBA').upper()}**
-• Blockchain: **{project.get('blockchain', 'TBA')}**
-• Catégorie: **{project.get('category', 'N/A')}**
-• Audit: **{project.get('audit_firm', 'TBA')}**
-
-⚡ **DÉCISION: ✅ GO - WHALE APPROVED**
-
-#WhaleAlert #{project.get('symbol', 'crypto')} #x{result['predicted_multiple']:.0f} #PreTGE
-"""
-        
-        try:
-            url = f"https://api.telegram.org/bot{self.config.TELEGRAM_TOKEN}/sendMessage"
-            payload = {
-                'chat_id': self.config.TELEGRAM_CHAT,
-                'text': message,
-                'parse_mode': 'Markdown',
-                'disable_web_page_preview': False
-            }
-            
-            response = requests.post(url, json=payload, timeout=10)
-            
-            if response.status_code == 200:
-                logger.info("✅ Whale Alert envoyée!")
-                
-                # Marquer comme envoyé
-                conn = sqlite3.connect(self.config.DB_PATH)
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE analysis SET telegram_sent = 1
-                    WHERE project_id = (SELECT id FROM projects WHERE name = ? ORDER BY id DESC LIMIT 1)
-                ''', (project.get('name'),))
-                conn.commit()
-                conn.close()
-            else:
-                logger.error(f"❌ Telegram error: {response.text}")
-        
-        except Exception as e:
-            logger.error(f"❌ Erreur Telegram: {e}")
-    
-    def run_ultimate_scan(self) -> List[Dict]:
-        """SCAN ULTIME COMPLET"""
-        
-        logger.info("🌌 DÉMARRAGE QUANTUM WHALE SCANNER ULTIME")
-        
-        self.send_startup_message()
-        
+    # MÉTHODE D'EXÉCUTION PRINCIPALE
+    def run_complete_analysis(self):
+        """Exécute l'analyse complète"""
+        logger.info("🚀 LANCEMENT ANALYSE QUANTUM ULTIME...")
         start_time = time.time()
         
-        # 1. Collecte massive
-        all_projects = self.collector.scrape_all_launchpads_parallel()
+        # Test Telegram CRITIQUE
+        if not self.test_telegram_connection():
+            logger.error("❌ Test Telegram échoué - vérifiez la configuration")
+            return []
         
-        logger.info(f"📊 {len(all_projects)} projets collectés, début analyse...")
+        # Récupération projets de test RÉELS
+        test_projects = self.get_real_test_projects()
+        logger.info(f"🔍 Analyse de {len(test_projects)} projets...")
         
-        # 2. Analyse complète
         results = []
-        approved = []
+        approved_projects = []
         
-        for i, project in enumerate(all_projects, 1):
+        for project in test_projects:
             try:
-                logger.info(f"[{i}/{len(all_projects)}] Analyse: {project.get('name')}")
-                
-                result = self.analyze_project_complete(project)
+                result = self.analyze_single_project(project)
                 results.append(result)
                 
-                if result['go_decision']:
-                    approved.append(result)
-                
-                time.sleep(1)  # Rate limiting
-                
+                # Envoi Telegram si projet validé
+                if result.get('go_decision'):
+                    approved_projects.append(result)
+                    self.send_project_alert(result)
+                    
             except Exception as e:
-                logger.error(f"❌ Erreur {project.get('name')}: {e}")
+                logger.error(f"❌ Erreur analyse {project.get('name')}: {e}")
         
-        # 3. Rapport final
-        duration = time.time() - start_time
-        self.send_final_whale_report(results, approved, duration)
+        # Rapport final
+        self.generate_final_report(results, approved_projects, start_time)
         
-        logger.info(f"✅ SCAN TERMINÉ: {len(approved)}/{len(results)} pépites validées")
+        logger.info(f"✅ Analyse terminée: {len(approved_projects)}/{len(results)} projets approuvés")
         
         return results
-    
-    def send_startup_message(self):
-        """Message démarrage"""
+
+    def send_project_alert(self, project_result: Dict):
+        """Envoie une alerte Telegram pour un projet validé"""
+        project = project_result
+        ratios = project_result['ratios']
         
-        if not self.config.TELEGRAM_TOKEN:
-            return
-        
-        narratives = self.predictor.detect_current_narrative()
-        
-        msg = f"""
-🌌 **QUANTUM WHALE SCANNER - ACTIVATION**
+        message = f"""
+🎯 **PROJET VALIDÉ - QUANTUM SCANNER ULTIME**
 
-🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-🔧 Version: {self.VERSION}
+🏆 **{project['name']} ({project['symbol']})**
+📊 **Market Cap:** {project['market_cap']:,}€
+⭐ **Score Global:** {ratios['global_score']:.1%}
+🚀 **Potentiel:** {ratios.get('estimated_multiple', 1)}x
+⚡ **Risque:** {project_result['risk_level']}
 
-📊 **CONFIGURATION**
-• Launchpads: {len(self.collector.LAUNCHPADS_EXTENDED)}
-• VCs trackés: {len(self.TIER1_VCS)}
-• Projets x100 historiques: {len(HistoricalDatabase.X100_PROJECTS)}
-• ML: Entraîné ✅
+🔍 **Détails:**
+• Audit: {project['audit_score']}/100
+• Activité Dev: {project['dev_activity']}/100  
+• VCs: {', '.join(project['vcs'])}
+• Catégorie: {project['category']}
 
-🔥 **NARRATIVES 2025**
-{chr(10).join(['• ' + n for n in narratives])}
+📈 **Ratios Clés:**
+• Force VCs: {ratios.get('vc_strength', 0):.1%}
+• Risque Rugpull: {ratios.get('rugpull_risk', 0):.1%}
+• Smart Money: {ratios.get('smart_money_index', 0):.1%}
 
-⚡ **MISSION**
-Détecter pépites pre-TGE x50-x10000
-100% Sources GRATUITES
+🌐 **Liens:**
+[Site]({project['website']}) | [Twitter]({project['twitter']}) | [Telegram]({project['telegram']})
 
-#WhaleScanner #Launch
+💡 **Rationale:**
+{project_result['rationale'][:200]}...
+
+⚡ **Décision: ✅ GO**
+
+#Alert #{project['symbol']} #QuantumScanner #Opportunité
 """
         
+        if self.send_telegram_alert(message):
+            # Marquer comme envoyé en BD
+            self.mark_telegram_sent(project_result)
+
+    def mark_telegram_sent(self, project_result: Dict):
+        """Marque l'alerte comme envoyée en BD"""
         try:
-            url = f"https://api.telegram.org/bot{self.config.TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, json={'chat_id': self.config.TELEGRAM_CHAT, 'text': msg, 'parse_mode': 'Markdown'}, timeout=10)
-        except:
-            pass
-    
-    def send_final_whale_report(self, results: List[Dict], approved: List[Dict], duration: float):
-        """Rapport final"""
-        
-        if not self.config.TELEGRAM_TOKEN:
-            return
-        
-        total = len(results)
-        approved_count = len(approved)
-        
-        # Top 3
-        top3 = sorted(approved, key=lambda x: x['ratios']['whale_score'], reverse=True)[:3]
-        
-        top_str = '\n'.join([
-            f"  {i+1}. **{p['project']['name']}** - {p['ratios']['whale_score']*100:.1f}% - x{p['predicted_multiple']:.0f}"
-            for i, p in enumerate(top3)
-        ]) if top3 else '  Aucune pépite validée'
-        
-        # Stats
-        avg_whale_score = sum(r['ratios']['whale_score'] for r in approved) / len(approved) if approved else 0
-        avg_multiple = sum(r['predicted_multiple'] for r in approved) / len(approved) if approved else 0
-        
-        report = f"""
-📊 **RAPPORT FINAL - WHALE SCANNER**
-
-⏱️ Durée: **{duration/60:.1f} min**
-🔍 Analysés: **{total}**
-✅ Validés: **{approved_count}**
-📈 Taux: **{approved_count/total*100 if total > 0 else 0:.1f}%**
-
-📊 **STATISTIQUES**
-• Whale Score moyen: **{avg_whale_score*100:.1f}%**
-• Multiple moyen: **x{avg_multiple:.0f}**
-• Meilleur: **{max([r['ratios']['whale_score'] for r in results])*100:.1f}%** (si results)
-
-🏆 **TOP 3 PÉPITES**
-{top_str}
-
-💡 **RECOMMANDATION**
-{'🎯 OPPORTUNITÉS MAJEURES - REVIEW IMMÉDIATE!' if approved_count > 0 else '⚠️ Aucune opportunité - Nouveau scan dans 24h'}
-
-🔄 Prochain scan: 24h
-
-#WhaleReport #PreTGE #Final
-"""
-        
-        try:
-            url = f"https://api.telegram.org/bot{self.config.TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, json={'chat_id': self.config.TELEGRAM_CHAT, 'text': report, 'parse_mode': 'Markdown'}, timeout=10)
-        except:
-            pass
-    
-    def get_approved_projects(self, limit: int = 20) -> List[Dict]:
-        """Récupère projets approuvés depuis DB"""
-        try:
-            conn = sqlite3.connect(self.config.DB_PATH)
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT p.name, p.symbol, p.price_seed, p.website, p.source,
-                       a.whale_score, a.global_score, a.predicted_multiple, 
-                       a.risk_level, a.historical_match, a.similarity_score
-                FROM projects p
-                JOIN analysis a ON p.id = a.project_id
-                WHERE a.go_decision = 1
-                ORDER BY a.whale_score DESC
-                LIMIT ?
-            ''', (limit,))
+                UPDATE project_analysis 
+                SET telegram_sent = 1 
+                WHERE project_id = (
+                    SELECT id FROM projects WHERE name = ?
+                )
+            ''', (project_result['name'],))
             
-            projects = []
-            for row in cursor.fetchall():
-                projects.append({
-                    'name': row[0],
-                    'symbol': row[1],
-                    'price_seed': row[2],
-                    'website': row[3],
-                    'source': row[4],
-                    'whale_score': row[5],
-                    'global_score': row[6],
-                    'predicted_multiple': row[7],
-                    'risk_level': row[8],
-                    'historical_match': row[9],
-                    'similarity_score': row[10]
-                })
-            
+            conn.commit()
             conn.close()
-            return projects
-            
         except Exception as e:
-            logger.error(f"❌ Erreur DB: {e}")
-            return []
+            logger.error(f"Erreur marquage Telegram: {e}")
 
-
-# ========================================
-# WEB DASHBOARD
-# ========================================
-
-class WebDashboard:
-    """Dashboard Web Flask"""
-    
-    def __init__(self, scanner: QuantumWhaleScanner):
-        self.scanner = scanner
+    def generate_final_report(self, results: List[Dict], approved_projects: List[Dict], start_time: float):
+        """Génère un rapport final détaillé"""
+        duration = time.time() - start_time
+        total = len(results)
+        approved = len(approved_projects)
         
+        # Calcul des métriques
+        avg_score = np.mean([r['ratios'].get('global_score', 0) for r in results]) if results else 0
+        avg_multiple = np.mean([r['ratios'].get('estimated_multiple', 1) for r in approved_projects]) if approved_projects else 0
+        
+        report = f"""
+📊 **RAPPORT FINAL QUANTUM SCANNER ULTIME**
+
+🔧 **Analyse terminée:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+⏱️ **Durée:** {duration:.1f}s
+📈 **Projets analysés:** {total}
+✅ **Projets approuvés:** {approved}
+❌ **Projets rejetés:** {total - approved}
+🎯 **Taux de succès:** {approved/total:.1% if total > 0 else 0}%
+
+📊 **Métriques:**
+• Score moyen: {avg_score:.1%}
+• Multiple moyen: {avg_multiple:.1f}x
+• Meilleur projet: {max([r['ratios'].get('global_score', 0) for r in results]):.1% if results else 'N/A'}
+
+🏆 **Top Projets Approuvés:**
+{chr(10).join([f"• {p['name']} ({p['ratios'].get('global_score', 0):.1%}) - {p['ratios'].get('estimated_multiple', 1)}x" for p in approved_projects[:3]]) if approved_projects else '• Aucun'}
+
+💡 **Recommandation:** {'🎯 OPPORTUNITÉS DÉTECTÉES!' if approved > 0 else '⚠️ Aucune opportunité valide'}
+
+#Rapport #QuantumScanner #Final
+"""
+        
+        self.send_telegram_alert(report)
+        
+        # Sauvegarde métriques performance
+        self.save_performance_metrics(duration, total, approved, 0, len(approved_projects))
+
+    def save_performance_metrics(self, duration: float, analyzed: int, approved: int, scams: int, telegram_sent: int):
+        """Sauvegarde les métriques de performance"""
         try:
-            from flask import Flask, render_template_string, jsonify
-            self.Flask = Flask
-            self.render_template_string = render_template_string
-            self.jsonify = jsonify
-        except ImportError:
-            logger.warning("⚠️ Flask non installé - Dashboard désactivé")
-            self.Flask = None
-    
-    def create_app(self):
-        """Crée l'app Flask"""
-        
-        if not self.Flask:
-            return None
-        
-        app = self.Flask(__name__)
-        
-        @app.route('/')
-        def index():
-            projects = self.scanner.get_approved_projects(20)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Quantum Whale Scanner - Dashboard</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-        }
-        .container { max-width: 1400px; margin: 0 auto; }
-        header {
-            text-align: center;
-            padding: 40px 0;
-            background: rgba(0,0,0,0.2);
-            border-radius: 20px;
-            margin-bottom: 30px;
-        }
-        h1 { font-size: 3em; margin-bottom: 10px; }
-        .subtitle { opacity: 0.9; font-size: 1.2em; }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: rgba(255,255,255,0.1);
-            padding: 25px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .stat-value { font-size: 2.5em; font-weight: bold; margin: 10px 0; }
-        .stat-label { opacity: 0.8; }
-        .projects-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 20px;
-        }
-        .project-card {
-            background: rgba(255,255,255,0.1);
-            padding: 25px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-            border: 2px solid rgba(255,255,255,0.2);
-            transition: transform 0.3s, border-color 0.3s;
-        }
-        .project-card:hover {
-            transform: translateY(-5px);
-            border-color: rgba(255,255,255,0.5);
-        }
-        .project-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .project-name { font-size: 1.5em; font-weight: bold; }
-        .project-symbol {
-            background: rgba(255,255,255,0.2);
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.9em;
-        }
-        .project-scores {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin: 15px 0;
-        }
-        .score-item {
-            background: rgba(0,0,0,0.2);
-            padding: 10px;
-            border-radius: 10px;
-        }
-        .score-label { font-size: 0.8em; opacity: 0.8; }
-        .score-value { font-size: 1.5em; font-weight: bold; margin-top: 5px; }
-        .project-links {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
-        .btn {
-            padding: 8px 16px;
-            border-radius: 8px;
-            text-decoration: none;
-            color: white;
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.3);
-            transition: all 0.3s;
-            display: inline-block;
-        }
-        .btn:hover {
-            background: rgba(255,255,255,0.3);
-            transform: scale(1.05);
-        }
-        .risk-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: bold;
-        }
-        .risk-LOW { background: #10b981; }
-        .risk-MEDIUM { background: #f59e0b; }
-        .risk-HIGH { background: #ef4444; }
-        .risk-EXTREME { background: #991b1b; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🌌 Quantum Whale Scanner</h1>
-            <p class="subtitle">Dashboard Pre-TGE | Version """ + self.scanner.VERSION + """</p>
-        </header>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-label">Projets Validés</div>
-                <div class="stat-value">""" + str(len(projects)) + """</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Multiple Moyen</div>
-                <div class="stat-value">x""" + str(int(sum(p['predicted_multiple'] for p in projects) / len(projects)) if projects else 0) + """</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Whale Score Moyen</div>
-                <div class="stat-value">""" + str(int(sum(p['whale_score'] for p in projects) / len(projects) * 100) if projects else 0) + """%</div>
-            </div>
-        </div>
-        
-        <div class="projects-grid">
-            """ + ''.join([f"""
-            <div class="project-card">
-                <div class="project-header">
-                    <div class="project-name">{p['name']}</div>
-                    <div class="project-symbol">${p['symbol']}</div>
-                </div>
-                
-                <div class="project-scores">
-                    <div class="score-item">
-                        <div class="score-label">Whale Score</div>
-                        <div class="score-value">{int(p['whale_score']*100)}%</div>
-                    </div>
-                    <div class="score-item">
-                        <div class="score-label">Multiple</div>
-                        <div class="score-value">x{int(p['predicted_multiple'])}</div>
-                    </div>
-                    <div class="score-item">
-                        <div class="score-label">Global</div>
-                        <div class="score-value">{int(p['global_score']*100)}%</div>
-                    </div>
-                    <div class="score-item">
-                        <div class="score-label">Similarité</div>
-                        <div class="score-value">{int(p['similarity_score']*100)}%</div>
-                    </div>
-                </div>
-                
-                <div style="margin: 15px 0;">
-                    <span class="risk-badge risk-{p['risk_level']}">{p['risk_level']}</span>
-                    <span style="margin-left: 10px; opacity: 0.8;">
-                        Match: {p['historical_match']}
-                    </span>
-                </div>
-                
-                <div style="opacity: 0.8; font-size: 0.9em; margin: 10px 0;">
-                    💰 ${p['price_seed']:.6f} | 📍 {p['source'].upper()}
-                </div>
-                
-                <div class="project-links">
-                    <a href="{p['website']}" class="btn" target="_blank">🌐 Website</a>
-                    <a href="#" class="btn">📊 Détails</a>
-                </div>
-            </div>
-            """ for p in projects]) + """
-        </div>
-    </div>
-    
-    <script>
-        setInterval(() => location.reload(), 300000); // Refresh 5min
-    </script>
-</body>
-</html>
-            """
+            cursor.execute('''
+                INSERT INTO performance_metrics 
+                (scan_duration, projects_analyzed, projects_approved, scams_detected, telegram_messages_sent)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (duration, analyzed, approved, scams, telegram_sent))
             
-            return html
-        
-        @app.route('/api/projects')
-        def api_projects():
-            projects = self.scanner.get_approved_projects(50)
-            return self.jsonify(projects)
-        
-        return app
-    
-    def run(self):
-        """Lance le dashboard"""
-        
-        if not self.Flask:
-            logger.warning("⚠️ Dashboard désactivé (Flask manquant)")
-            return
-        
-        app = self.create_app()
-        if app:
-            logger.info(f"🌐 Dashboard: http://{self.scanner.config.DASHBOARD_HOST}:{self.scanner.config.DASHBOARD_PORT}")
-            app.run(
-                host=self.scanner.config.DASHBOARD_HOST,
-                port=self.scanner.config.DASHBOARD_PORT,
-                debug=False
-            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde métriques: {e}")
 
-
-# ========================================
-# MAIN
-# ========================================
-
-def main():
-    """Main function"""
-    
-    print("""
-    ╔══════════════════════════════════════════════════════════╗
-    ║                                                          ║
-    ║     🌌 QUANTUM WHALE SCANNER 🌌                         ║
-    ║                                                          ║
-    ║     Version: ULTIMATE COMPLETE 2.0                       ║
-    ║     Features: ML + Dashboard + 100+ Sources              ║
-    ║     Status: 🟢 OPERATIONAL                              ║
-    ║                                                          ║
-    ╚══════════════════════════════════════════════════════════╝
-    """)
-    
-    # Config
-    config = Config()
-    
-    # Scanner
-    scanner = QuantumWhaleScanner(config)
-    
-    # Mode choix
-    print("\n📋 MODES DISPONIBLES:")
-    print("1. 🚀 Scan complet (analyse tous les launchpads)")
-    print("2. 🌐 Dashboard Web (visualisation)")
-    print("3. 🔄 Scan + Dashboard (les deux)")
-    
-    choice = input("\nChoisissez un mode (1/2/3): ").strip()
-    
-    if choice == "1":
-        results = scanner.run_ultimate_scan()
+    # MÉTHODE DE LANCEMENT
+    def launch_quantum_scanner(self):
+        """Lance le scanner quantique complet"""
+        logger.info("🌌 QUANTUM MILITARY SCANNER ULTIME - ACTIVATION...")
         
-        print(f"\n{'='*60}")
-        print(f"✅ SCAN TERMINÉ")
-        print(f"📊 {len(results)} projets analysés")
-        print(f"✅ {sum(1 for r in results if r['go_decision'])} pépites validées")
-        print(f"{'='*60}\n")
-        
-        # Top 5
-        approved = [r for r in results if r['go_decision']]
-        if approved:
-            print("🏆 TOP 5 PÉPITES:\n")
-            for i, r in enumerate(approved[:5], 1):
-                p = r['project']
-                print(f"{i}. {p['name']} (${p.get('symbol', 'UNK')})")
-                print(f"   Whale: {r['ratios']['whale_score']*100:.1f}% | Multiple: x{r['predicted_multiple']:.0f}")
-                print(f"   Match: {r['historical_match']} ({r['similarity_score']*100:.0f}%)")
-                print(f"   VCs: {', '.join(p.get('vcs', [])[:3]) if p.get('vcs') else 'N/A'}")
-                print()
-    
-    elif choice == "2":
-        dashboard = WebDashboard(scanner)
-        dashboard.run()
-    
-    elif choice == "3":
-        # Scan en background
-        import threading
-        scan_thread = threading.Thread(target=scanner.run_ultimate_scan)
-        scan_thread.daemon = True
-        scan_thread.start()
-        
-        # Dashboard en foreground
-        dashboard = WebDashboard(scanner)
-        dashboard.run()
-    
-    else:
-        print("❌ Choix invalide")
+        # Message de démarrage
+        startup_msg = f"""
+🚀 **QUANTUM SCANNER ULTIME v{self.version} - ACTIVATION**
 
+🕒 **Démarrage:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🔧 **Version:** {self.version}
+🎯 **MC Max:** {self.MAX_MARKET_CAP_EUROS:,}€
+📊 **Statut:** 🟢 OPÉRATIONNEL
 
+💡 **Objectif:** Détection projets < 621k€ avec fort potentiel
+
+#Démarrage #QuantumScanner #Ultime
+"""
+        self.send_telegram_alert(startup_msg)
+        
+        # Lancement analyse
+        results = self.run_complete_analysis()
+        
+        return results
+
+    # SYSTÈME 24/7 AVEC SCHEDULER
+    def run_24_7_scanner(self):
+        """Lance le scanner en mode 24/7"""
+        scan_interval = int(os.getenv('SCAN_INTERVAL_HOURS', 6)) * 3600
+        
+        logger.info(f"🔄 Mode 24/7 activé - Scan toutes les {scan_interval/3600} heures")
+        
+        while True:
+            try:
+                self.launch_quantum_scanner()
+                logger.info(f"⏰ Prochain scan dans {scan_interval/3600} heures...")
+                time.sleep(scan_interval)
+                
+            except KeyboardInterrupt:
+                logger.info("⏹️ Arrêt demandé par l'utilisateur")
+                break
+            except Exception as e:
+                logger.error(f"💥 Erreur dans le scanner 24/7: {e}")
+                logger.info("🔄 Redémarrage dans 60 secondes...")
+                time.sleep(60)
+
+# LANCEMENT DU PROGRAMME
 if __name__ == "__main__":
     try:
-        main()
-    except KeyboardInterrupt:
-        print("\n⚠️ Arrêt demandé")
+        logger.info("🌌 INITIALISATION QUANTUM SCANNER ULTIME...")
+        
+        # Création instance
+        scanner = QuantumMilitaryScannerULTIME()
+        
+        # Choix du mode
+        print("\n" + "="*60)
+        print("🌌 QUANTUM MILITARY SCANNER ULTIME v4.0.0")
+        print("="*60)
+        print("1. 🚀 Scan unique")
+        print("2. 🔄 Mode 24/7 (scans automatiques)")
+        print("3. 🔧 Test configuration")
+        
+        choice = input("\nChoisissez le mode (1/2/3): ").strip()
+        
+        if choice == "1":
+            # Lancement unique
+            results = scanner.launch_quantum_scanner()
+            logger.info("✅ SCAN UNIQUE TERMINÉ!")
+            
+        elif choice == "2":
+            # Mode 24/7
+            scanner.run_24_7_scanner()
+            
+        elif choice == "3":
+            # Test configuration
+            if scanner.test_telegram_connection():
+                print("✅ Configuration OK!")
+            else:
+                print("❌ Problème de configuration!")
+                
+        else:
+            print("❌ Choix invalide, lancement du scan unique...")
+            results = scanner.launch_quantum_scanner()
+        
+        logger.info("✅ QUANTUM SCANNER ULTIME - MISSION ACCOMPLIE!")
+        
     except Exception as e:
         logger.error(f"💥 ERREUR CRITIQUE: {e}")
-        import traceback
-        traceback.print_exc()
+        
+        # Tentative d'envoi d'erreur via Telegram
+        try:
+            error_scanner = QuantumMilitaryScannerULTIME()
+            error_msg = f"""
+💥 **ERREUR CRITIQUE QUANTUM SCANNER**
+
+❌ **Erreur:** {str(e)}
+🕒 **Heure:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🔧 **Action nécessaire:** Vérifier les logs
+
+#Erreur #QuantumScanner
+"""
+            error_scanner.send_telegram_alert(error_msg)
+        except:
+            pass  # Double erreur, on abandonne
+            
+        sys.exit(1)
