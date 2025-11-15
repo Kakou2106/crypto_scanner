@@ -1,32 +1,54 @@
-# QUANTUM_SCANNER_ULTIME_FIX.py
-import aiohttp, asyncio, sqlite3, requests, re, time, json, os, logging
-from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
-from telegram import Bot
-from dotenv import load_dotenv
-from urllib.parse import urlparse
-import ssl
-import certifi
+# quantum_scanner.py
+import aiohttp
+import asyncio
+import sqlite3
+import requests
+import re
+import time
+import json
+import os
+import logging
 import sys
 import subprocess
+from datetime import datetime
+from urllib.parse import urlparse
 
-# Gestion des imports optionnels
-try:
-    import whois
-    WHOIS_AVAILABLE = True
-except ImportError:
-    WHOIS_AVAILABLE = False
-    print("⚠️  Module 'whois' non installé - certaines vérifications seront limitées")
-
+# Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+# Gestion des imports optionnels
+try:
+    from telegram import Bot
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    logger.warning("⚠️ Module 'python-telegram-bot' non installé")
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+    logger.warning("⚠️ Module 'python-dotenv' non installé")
+
+try:
+    from bs4 import BeautifulSoup
+    BEAUTIFULSOUP_AVAILABLE = True
+except ImportError:
+    BEAUTIFULSOUP_AVAILABLE = False
+    logger.warning("⚠️ Module 'beautifulsoup4' non installé")
 
 class QuantumScannerUltime:
     def __init__(self):
-        self.bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
-        self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        if TELEGRAM_AVAILABLE:
+            self.bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN', 'dummy_token'))
+            self.chat_id = os.getenv('TELEGRAM_CHAT_ID', 'dummy_chat_id')
+        else:
+            self.bot = None
+            self.chat_id = None
+            
         self.MAX_MC = 100000
         self.scam_databases = self.initialiser_bases_antiscam()
         self.vc_blacklist = self.initialiser_vc_blacklist()
@@ -37,8 +59,7 @@ class QuantumScannerUltime:
         """Initialise les bases de données anti-scam"""
         return {
             'cryptoscamdb': 'https://api.cryptoscamdb.org/v1/check/',
-            'metamask_phishing': 'https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json',
-            'phishfort': 'https://raw.githubusercontent.com/phishfort/phishfort-lists/master/blacklists/domains.json'
+            'metamask_phishing': 'https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json'
         }
     
     def initialiser_vc_blacklist(self):
@@ -67,8 +88,8 @@ class QuantumScannerUltime:
                         data = await resp.json()
                         if data.get('success') and data.get('result', {}).get('type') == 'scam':
                             return False, ["Scam détecté dans CryptoScamDB"]
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Erreur CryptoScamDB: {e}")
         
         return True, []
 
@@ -104,7 +125,7 @@ class QuantumScannerUltime:
                 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
                 async with session.get(url, headers=headers, timeout=10) as response:
                     if response.status != 200:
-                        return False, [f"{platform} inaccessible"]
+                        return False, [f"{platform} inaccessible: HTTP {response.status}"]
                     
                     html = await response.text()
                     
@@ -137,41 +158,47 @@ class QuantumScannerUltime:
                 async with session.get(url, timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
-                        for item in data.get('coins', [])[:10]:
+                        for item in data.get('coins', [])[:5]:
                             coin = item.get('item', {})
                             projets.append({
                                 'nom': coin.get('name', ''),
                                 'symbol': coin.get('symbol', '').upper(),
-                                'mc': coin.get('market_cap_rank', 99999) * 1000,  # Estimation
+                                'mc': (100 - coin.get('market_cap_rank', 100)) * 1000,  # Estimation
                                 'website': f"https://www.coingecko.com/en/coins/{coin.get('id', '')}",
-                                'twitter': f"https://twitter.com/{coin.get('id', '')}",
+                                'twitter': f"https://twitter.com/search?q={coin.get('name', '').replace(' ', '')}",
                                 'telegram': '',
                                 'github': '',
                                 'category': 'Trending'
                             })
+            logger.info(f"✅ CoinGecko: {len([p for p in projets if p['category'] == 'Trending'])} projets")
         except Exception as e:
             logger.error(f"❌ Erreur CoinGecko: {e}")
-        
-        # DEX Screener (API publique)
-        try:
-            url = "https://api.dexscreener.com/latest/dex/search/?q=ETH"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        for pair in data.get('pairs', [])[:10]:
-                            projets.append({
-                                'nom': pair.get('baseToken', {}).get('name', ''),
-                                'symbol': pair.get('baseToken', {}).get('symbol', ''),
-                                'mc': pair.get('marketCap', 0),
-                                'website': '',
-                                'twitter': pair.get('info', {}).get('twitter', ''),
-                                'telegram': pair.get('info', {}).get('telegram', ''),
-                                'github': '',
-                                'category': 'DeFi'
-                            })
-        except Exception as e:
-            logger.error(f"❌ Erreur DEX Screener: {e}")
+
+        # Fallback: projets simulés si APIs échouent
+        if not projets:
+            logger.info("🔄 Utilisation de projets de démonstration...")
+            projets = [
+                {
+                    'nom': 'Bitcoin',
+                    'symbol': 'BTC',
+                    'mc': 45000,
+                    'website': 'https://bitcoin.org',
+                    'twitter': 'https://twitter.com/bitcoin',
+                    'telegram': '',
+                    'github': 'https://github.com/bitcoin',
+                    'category': 'BlueChip'
+                },
+                {
+                    'nom': 'Ethereum', 
+                    'symbol': 'ETH',
+                    'mc': 32000,
+                    'website': 'https://ethereum.org',
+                    'twitter': 'https://twitter.com/ethereum',
+                    'telegram': '',
+                    'github': 'https://github.com/ethereum',
+                    'category': 'BlueChip'
+                }
+            ]
         
         return [p for p in projets if p['mc'] <= self.MAX_MC and p['nom']]
 
@@ -225,6 +252,10 @@ class QuantumScannerUltime:
 
     async def envoyer_alerte_telegram(self, projet, security_score, verifications):
         """Envoi d'alerte Telegram"""
+        if not TELEGRAM_AVAILABLE or not self.bot:
+            logger.warning("⚠️ Telegram non disponible - alerte non envoyée")
+            return
+
         # Résumé des vérifications
         status_text = ""
         for check, (is_ok, issues) in verifications.items():
@@ -264,7 +295,7 @@ class QuantumScannerUltime:
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
-            logger.info(f"📤 Alerte envoyée pour {projet['nom']}")
+            logger.info(f"📤 Alerte Telegram envoyée pour {projet['nom']}")
         except Exception as e:
             logger.error(f"❌ Erreur envoi Telegram: {e}")
 
@@ -280,6 +311,7 @@ class QuantumScannerUltime:
         
         for projet in projets:
             try:
+                logger.info(f"🔍 Analyse de {projet['nom']}...")
                 is_legit, security_score, verifications = await self.analyser_projet_complet(projet)
                 
                 if is_legit:
@@ -297,7 +329,7 @@ class QuantumScannerUltime:
                     
                     await asyncio.sleep(1)  # Anti-spam
                     
-                logger.info(f"🔍 {projet['nom']} - Score: {security_score} - Validé: {is_legit}")
+                logger.info(f"📊 {projet['nom']} - Score: {security_score} - Validé: {is_legit}")
                 
             except Exception as e:
                 logger.error(f"❌ Erreur analyse {projet.get('nom', 'Inconnu')}: {e}")
@@ -308,11 +340,15 @@ class QuantumScannerUltime:
         """Lance un scan unique avec rapport"""
         start_time = time.time()
         
-        await self.bot.send_message(
-            chat_id=self.chat_id,
-            text="🔍 **SCAN QUANTUM UNIQUE DÉMARRÉ**\nAnalyse en cours...",
-            parse_mode='Markdown'
-        )
+        if TELEGRAM_AVAILABLE:
+            try:
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text="🔍 **SCAN QUANTUM UNIQUE DÉMARRÉ**\nAnalyse en cours...",
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible d'envoyer le message de départ Telegram: {e}")
         
         try:
             total_projets, projets_valides = await self.executer_scan_unique()
@@ -341,24 +377,42 @@ class QuantumScannerUltime:
 #QuantumScan #Rapport
 """
             
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=rapport,
-                parse_mode='Markdown'
-            )
+            logger.info(rapport)
+            
+            if TELEGRAM_AVAILABLE:
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=rapport,
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Impossible d'envoyer le rapport Telegram: {e}")
             
             logger.info(f"✅ SCAN TERMINÉ: {projets_valides} projets validés sur {total_projets}")
             
         except Exception as e:
             logger.error(f"💥 ERREUR SCAN: {e}")
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=f"❌ ERREUR SCAN: {str(e)}"
-            )
+            if TELEGRAM_AVAILABLE:
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=f"❌ ERREUR SCAN: {str(e)}"
+                    )
+                except:
+                    pass
 
 def installer_dependances():
     """Installe les dépendances manquantes"""
-    packages = ['python-telegram-bot', 'python-dotenv', 'aiohttp', 'beautifulsoup4', 'requests']
+    packages = [
+        'python-telegram-bot', 
+        'python-dotenv', 
+        'aiohttp', 
+        'beautifulsoup4', 
+        'requests'
+    ]
+    
+    print("📦 Installation des dépendances...")
     
     for package in packages:
         try:
@@ -369,8 +423,6 @@ def installer_dependances():
 
 # Interface en ligne de commande
 async def main():
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Quantum Scanner - Scanner Crypto Anti-Scam')
     parser.add_argument('--once', action='store_true', help='Exécute un scan unique')
     parser.add_argument('--install', action='store_true', help='Installe les dépendances')
@@ -378,27 +430,36 @@ async def main():
     args = parser.parse_args()
     
     if args.install:
-        print("📦 Installation des dépendances...")
         installer_dependances()
         return
     
     if args.once:
-        print("🚀 Lancement du scan unique...")
+        print("🚀 Lancement du scan unique Quantum Scanner...")
         scanner = QuantumScannerUltime()
         await scanner.run_scan_once()
     else:
-        print("🔧 Utilisation: python quantum_scanner.py --once")
-        print("🔧 Installation: python quantum_scanner.py --install")
+        print("🔧 Utilisation:")
+        print("   python quantum_scanner.py --once     # Exécute un scan")
+        print("   python quantum_scanner.py --install  # Installe les dépendances")
 
 if __name__ == "__main__":
+    import argparse
+    
     # Vérification des dépendances critiques
+    missing_deps = []
+    
     try:
         import aiohttp
-        import beautifulsoup4
-        from telegram import Bot
-        from dotenv import load_dotenv
-    except ImportError as e:
-        print(f"❌ Dépendance manquante: {e}")
+    except ImportError:
+        missing_deps.append('aiohttp')
+    
+    try:
+        import requests
+    except ImportError:
+        missing_deps.append('requests')
+    
+    if missing_deps:
+        print(f"❌ Dépendances manquantes: {', '.join(missing_deps)}")
         print("💡 Utilisez: python quantum_scanner.py --install")
         sys.exit(1)
     
