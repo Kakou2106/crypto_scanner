@@ -112,15 +112,15 @@ class QuantumScannerUltime:
                 async with session.get(url, timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
-                        for item in data.get('coins', [])[:10]:  # Plus de projets
+                        for item in data.get('coins', [])[:10]:
                             coin = item.get('item', {})
                             
                             # Estimation MC plus réaliste
                             mc_rank = coin.get('market_cap_rank', 100)
                             if mc_rank:
-                                estimated_mc = (101 - mc_rank) * 50000  # MC plus réaliste
+                                estimated_mc = (101 - mc_rank) * 50000
                             else:
-                                estimated_mc = 50000  # Valeur par défaut
+                                estimated_mc = 50000
                             
                             projets.append({
                                 'nom': coin.get('name', ''),
@@ -184,30 +184,29 @@ class QuantumScannerUltime:
         return [p for p in projets if p['mc'] <= self.MAX_MC and p['nom']]
 
     async def analyser_projet_complet(self, projet):
-        """Analyse complète avec critères ASSOUPLIS pour générer des alertes"""
+        """Analyse complète avec critères ASSOUPLIS"""
         verifications = {}
         security_score = 0
         
-        # 1. Vérification site web (40 points) - CRITÈRE ASSOUPLI
+        # 1. Vérification site web (40 points)
         if projet.get('website'):
             site_ok, site_issues = await self.verifier_site_web(projet['website'])
             verifications['site'] = (site_ok, site_issues)
             if site_ok:
-                security_score += 40  # Plus de points pour site accessible
+                security_score += 40
             else:
-                # Même si le site échoue, on donne des points partiels
                 security_score += 20
                 
-        # 2. Vérification anti-scam (30 points) - CRITÈRE ASSOUPLI
+        # 2. Vérification anti-scam (30 points)
         if projet.get('website'):
             scam_clean, scam_issues = await self.verifier_dans_base_scam(projet['website'])
             verifications['scam_check'] = (scam_clean, scam_issues)
             if scam_clean:
-                security_score += 30  # Points bonus si pas de scam
+                security_score += 30
             else:
-                security_score += 15  # Points même si vérification échoue
+                security_score += 15
 
-        # 3. Bonus market cap bas (20 points) - CRITÈRE ASSOUPLI
+        # 3. Bonus market cap bas (20 points)
         if projet.get('mc', 0) <= 50000:
             security_score += 20
         elif projet.get('mc', 0) <= 80000:
@@ -225,58 +224,52 @@ class QuantumScannerUltime:
 
         # GARANTIR UN SCORE MINIMUM POUR LES PROJETS DE DÉMONSTRATION
         if any(keyword in projet['nom'] for keyword in ['Quantum', 'Meta', 'DeFi']):
-            security_score = max(security_score, 75)  # Score garanti pour les démos
+            security_score = max(security_score, 75)
 
         # Décision finale TRÈS ASSOUPLIE
-        is_legit = (
-            security_score >= 40 and  # Seuil BAISSÉ de 50 à 40
-            security_score > 0
-        )
+        is_legit = security_score >= 40
         
         return is_legit, security_score, verifications
 
     async def envoyer_alerte_telegram(self, projet, security_score, verifications):
-        """Envoi d'alerte Telegram avec formatage AMÉLIORÉ"""
+        """Envoi d'alerte Telegram avec MARKDOWN CORRIGÉ"""
         if not TELEGRAM_AVAILABLE or not self.bot:
             logger.warning("⚠️ Telegram non disponible - alerte non envoyée")
             return
 
         # Calcul du potentiel de gain
-        price_multiple = min(security_score / 10, 15)  # Multiple basé sur le score
+        price_multiple = min(security_score / 10, 15)
         potential_gain = (price_multiple - 1) * 100
         
-        # Résumé des vérifications
-        status_text = ""
-        for check, (is_ok, issues) in verifications.items():
-            status = "✅" if is_ok else "⚠️"
-            issues_text = issues[0] if issues else "OK"
-            status_text += f"• {check}: {status} {issues_text}\n"
-        
+        # RÉPARATION DU MARKDOWN : Supprimer les liens qui cassent le parsing
         message = f"""
-🚀 **QUANTUM SCANNER - ALERTE EARLY GEM** 🚀
+🚀 *QUANTUM SCANNER - ALERTE EARLY GEM* 🚀
 
-🏆 **{projet['nom']} ({projet['symbol']})**
+🏆 *{projet['nom']} ({projet['symbol']})*
 
-📊 **SCORE QUANTUM: {security_score}/100**
-🎯 **DÉCISION: ✅ GO ABSOLU** 
-⚡ **POTENTIEL: x{price_multiple:.1f} (+{potential_gain:.0f}%)**
+📊 *SCORE QUANTUM: {security_score}/100*
+🎯 *DÉCISION: ✅ GO ABSOLU* 
+⚡ *POTENTIEL: x{price_multiple:.1f} (+{potential_gain:.0f}%)*
 
-💰 **ANALYSE FINANCIÈRE:**
-• Market Cap: **{projet['mc']:,.0f}€** 
-• Prix actuel: **${projet.get('price', 0.1):.4f}**
-• Rang MC: **#{projet.get('market_cap_rank', 'N/A')}**
-• Catégorie: **{projet.get('category', 'Crypto')}**
+💰 *ANALYSE FINANCIÈRE:*
+• Market Cap: *{projet['mc']:,.0f}€* 
+• Prix actuel: *${projet.get('price', 0.1):.4f}*
+• Rang MC: *#{projet.get('market_cap_rank', 'N/A')}*
+• Catégorie: *{projet.get('category', 'Crypto')}*
 
-🔍 **VÉRIFICATIONS:**
-{status_text}
+🔍 *VÉRIFICATIONS:*
+• Site: {'✅' if verifications.get('site', (False, []))[0] else '❌'} {verifications.get('site', (False, []))[1][0] if verifications.get('site') else 'Non vérifié'}
+• Anti-scam: {'✅' if verifications.get('scam_check', (False, []))[0] else '❌'} {verifications.get('scam_check', (False, []))[1][0] if verifications.get('scam_check') else 'Non vérifié'}
 
-🌐 **LIENS OFFICIELS:**
-[Website]({projet.get('website', 'N/A')}) | [Twitter]({projet.get('twitter', 'N/A')}) | [Telegram]({projet.get('telegram', 'N/A')})
+🌐 *LIENS OFFICIELS:*
+Website: {projet.get('website', 'N/A')}
+Twitter: {projet.get('twitter', 'N/A')}
+Telegram: {projet.get('telegram', 'N/A')}
 
-💎 **CONFIDENCE: {min(security_score, 95):.0f}%**
-🎯 **TARGET: x{price_multiple:.1f} GAINS**
+💎 *CONFIDENCE: {min(security_score, 95):.0f}%*
+🎯 *TARGET: x{price_multiple:.1f} GAINS*
 
-⚡ **ACTION IMMÉDIATE RECOMMANDÉE**
+⚡ *ACTION IMMÉDIATE RECOMMANDÉE*
 
 #QuantumScanner #{projet['symbol']} #EarlyGem #CryptoAlert
 """
@@ -291,9 +284,40 @@ class QuantumScannerUltime:
             logger.info(f"📤 ALERTE ENVOYÉE: {projet['nom']} - Score: {security_score}")
         except Exception as e:
             logger.error(f"❌ Erreur envoi Telegram: {e}")
+            # Fallback: envoyer sans markdown
+            try:
+                message_simple = f"""
+🚀 QUANTUM SCANNER - ALERTE EARLY GEM 🚀
+
+🏆 {projet['nom']} ({projet['symbol']})
+
+📊 SCORE QUANTUM: {security_score}/100
+🎯 DÉCISION: ✅ GO ABSOLU 
+⚡ POTENTIEL: x{price_multiple:.1f} (+{potential_gain:.0f}%)
+
+💰 ANALYSE FINANCIÈRE:
+• Market Cap: {projet['mc']:,.0f}€
+• Prix actuel: ${projet.get('price', 0.1):.4f}
+• Catégorie: {projet.get('category', 'Crypto')}
+
+💎 CONFIDENCE: {min(security_score, 95):.0f}%
+🎯 TARGET: x{price_multiple:.1f} GAINS
+
+⚡ ACTION IMMÉDIATE RECOMMANDÉE
+
+#QuantumScanner #{projet['symbol']}
+"""
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message_simple,
+                    disable_web_page_preview=True
+                )
+                logger.info(f"📤 ALERTE SIMPLE ENVOYÉE: {projet['nom']}")
+            except Exception as e2:
+                logger.error(f"❌ Erreur envoi simple: {e2}")
 
     async def executer_scan_unique(self):
-        """Exécute un scan unique avec CRITÈRES ASSOUPLIS"""
+        """Exécute un scan unique"""
         logger.info("🔍 DÉBUT DU SCAN QUANTUM...")
         
         # Scan des projets réels
@@ -330,14 +354,14 @@ class QuantumScannerUltime:
         return len(projets), projets_valides
 
     async def run_scan_once(self):
-        """Lance un scan unique avec rapport OPTIMISTE"""
+        """Lance un scan unique avec rapport"""
         start_time = time.time()
         
         if TELEGRAM_AVAILABLE:
             try:
                 await self.bot.send_message(
                     chat_id=self.chat_id,
-                    text="🚀 **SCAN QUANTUM ULTIME DÉMARRÉ**\nChasse aux Early Gems en cours...",
+                    text="🚀 *SCAN QUANTUM ULTIME DÉMARRÉ*\nChasse aux Early Gems en cours...",
                     parse_mode='Markdown'
                 )
             except Exception as e:
@@ -347,31 +371,25 @@ class QuantumScannerUltime:
             total_projets, projets_valides = await self.executer_scan_unique()
             duree = time.time() - start_time
             
-            # Rapport final OPTIMISTE
+            # Rapport final
             rapport = f"""
-🎯 **SCAN QUANTUM TERMINÉ - RAPPORT EXPLOSIF**
+🎯 *SCAN QUANTUM TERMINÉ - RAPPORT EXPLOSIF*
 
-📊 **RÉSULTATS MASSIFS:**
-• Projets scannés: **{total_projets}**
-• 🚀 **GEMS DÉTECTÉES: {projets_valides}**
-• Taux de succès: **{(projets_valides/max(total_projets,1))*100:.1f}%**
+📊 *RÉSULTATS MASSIFS:*
+• Projets scannés: *{total_projets}*
+• 🚀 *GEMS DÉTECTÉES: {projets_valides}*
+• Taux de succès: *{(projets_valides/max(total_projets,1))*100:.1f}%*
 
-💎 **DÉCOUVERTES:**
-• {random.randint(2, 5)} projets AI révolutionnaires
-• {random.randint(1, 3)} gems Gaming prometteurs
-• {random.randint(1, 3)} protocoles DeFi innovants
+⚡ *PERFORMANCE QUANTUM:*
+• Durée: *{duree:.1f}s*
+• Vitesse: *{total_projets/max(duree,1):.1f} projets/s*
 
-⚡ **PERFORMANCE QUANTUM:**
-• Durée: **{duree:.1f}s**
-• Vitesse: **{total_projets/max(duree,1):.1f} projets/s**
-• Efficacité: **{projets_valides/max(total_projets,1)*100:.1f}%**
+🚀 *{projets_valides} ALERTES EARLY GEMS ENVOYÉES!*
 
-🚀 **{projets_valides} ALERTES EARLY GEMS ENVOYÉES!**
-
-🎯 **Prochain scan dans 6 heures**
+🎯 *Prochain scan dans 6 heures*
 """
             
-            logger.info(rapport)
+            logger.info(rapport.replace('*', ''))
             
             if TELEGRAM_AVAILABLE:
                 try:
@@ -381,7 +399,27 @@ class QuantumScannerUltime:
                         parse_mode='Markdown'
                     )
                 except Exception as e:
-                    logger.warning(f"⚠️ Impossible d'envoyer le rapport Telegram: {e}")
+                    # Fallback sans markdown
+                    rapport_simple = f"""
+🎯 SCAN QUANTUM TERMINÉ - RAPPORT EXPLOSIF
+
+📊 RÉSULTATS MASSIFS:
+• Projets scannés: {total_projets}
+• 🚀 GEMS DÉTECTÉES: {projets_valides}
+• Taux de succès: {(projets_valides/max(total_projets,1))*100:.1f}%
+
+⚡ PERFORMANCE QUANTUM:
+• Durée: {duree:.1f}s
+• Vitesse: {total_projets/max(duree,1):.1f} projets/s
+
+🚀 {projets_valides} ALERTES EARLY GEMS ENVOYÉES!
+
+🎯 Prochain scan dans 6 heures
+"""
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=rapport_simple
+                    )
             
             logger.info(f"✅ SCAN QUANTUM RÉUSSI: {projets_valides} alertes envoyées!")
             
