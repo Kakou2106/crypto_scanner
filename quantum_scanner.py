@@ -23,13 +23,15 @@ class QuantumScannerAntiScamUltimate:
             'BlockFi', 'Celsius Network', 'Voyager Digital', 'FTX Ventures'
         }
         
-        # MOTS-CLÉS SCAM RENFORCÉS
+        # MOTS-CLÉS SCAM RENFORCÉS (expressions complètes uniquement)
         self.SCAM_KEYWORDS = [
-            'suspended', 'banned', 'removed', 'deleted', 'not found', '404',
-            'for sale', 'parked', 'domain expired', 'coming soon', 'under construction',
             'account suspended', 'page not found', 'this page doesn\'t exist',
             'content unavailable', 'profile not available', 'domain parking',
-            'buy this domain', 'sedo', 'godaddy parking', 'afternic', 'hugedomains'
+            'buy this domain', 'domain for sale', 'this domain is for sale',
+            'parked domain', 'sedo domain', 'godaddy parking page',
+            'afternic domain', 'hugedomains', 'domain expired',
+            'under construction', 'site under construction',
+            'coming soon page', 'website coming soon'
         ]
         
         # APIs ANTI-SCAM (à configurer avec tes clés si disponibles)
@@ -358,21 +360,29 @@ class QuantumScannerAntiScamUltimate:
         """Vérification site web ULTRA-APPROFONDIE"""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=15, allow_redirects=True) as r:
+                async with session.get(url, timeout=15, allow_redirects=True, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }) as r:
                     html = await r.text()
                     html_lower = html.lower()
                     
-                    # 1. DÉTECTION SCAM/PARKING RENFORCÉE
-                    if any(keyword in html_lower for keyword in self.SCAM_KEYWORDS):
-                        logger.error(f"❌ Site {url}: SCAM/PARKING keywords détectés!")
+                    # 1. DÉTECTION SCAM/PARKING STRICTE (phrases complètes)
+                    scam_detected = False
+                    for keyword in self.SCAM_KEYWORDS:
+                        if keyword in html_lower:
+                            logger.error(f"❌ Site {url}: SCAM keyword '{keyword}' détecté!")
+                            scam_detected = True
+                            break
+                    
+                    if scam_detected:
                         return False, "SCAM/PARKING DETECTED"
                     
                     # 2. Vérification SSL/HTTPS
                     if not url.startswith('https://'):
-                        logger.error(f"❌ Site {url}: PAS DE SSL (HTTP seulement)!")
-                        return False, "NO SSL"
+                        logger.warning(f"⚠️ Site {url}: PAS DE SSL (toléré)")
+                        # Non bloquant pour certains projets early-stage
                     
-                    # 3. VÉRIFICATION CONTENU CRYPTO RENFORCÉE
+                    # 3. VÉRIFICATION CONTENU CRYPTO (au moins 2 mots-clés)
                     crypto_keywords = [
                         'token', 'blockchain', 'web3', 'defi', 'nft', 'crypto',
                         'dao', 'smart contract', 'whitepaper', 'roadmap', 'tokenomics'
@@ -380,46 +390,48 @@ class QuantumScannerAntiScamUltimate:
                     
                     crypto_count = sum(1 for keyword in crypto_keywords if keyword in html_lower)
                     
-                    if crypto_count < 3:
-                        logger.error(f"❌ Site {url}: PAS ASSEZ DE CONTENU CRYPTO ({crypto_count}/11)")
-                        return False, "NOT CRYPTO PROJECT"
+                    if crypto_count < 2:
+                        logger.warning(f"⚠️ Site {url}: Peu de contenu crypto ({crypto_count}/11)")
+                        # Non bloquant si autres critères OK
                     
-                    # 4. VÉRIFICATION NOM PROJET
-                    if project_name.lower() not in html_lower:
-                        logger.warning(f"⚠️ Site {url}: Nom projet '{project_name}' absent!")
-                        return False, "PROJECT NAME NOT FOUND"
+                    # 4. VÉRIFICATION NOM PROJET (tolérant)
+                    project_name_clean = project_name.lower().replace(' ', '')
+                    html_clean = html_lower.replace(' ', '')
                     
-                    # 5. VÉRIFICATION ÉLÉMENTS ESSENTIELS
-                    essential_elements = {
-                        'whitepaper': False,
-                        'roadmap': False,
-                        'team': False,
-                        'tokenomics': False
-                    }
+                    if project_name_clean not in html_clean and len(project_name) > 3:
+                        logger.warning(f"⚠️ Site {url}: Nom projet '{project_name}' peu visible")
+                        # Non bloquant
+                    
+                    # 5. VÉRIFICATION ÉLÉMENTS ESSENTIELS (score)
+                    essential_score = 0
+                    essential_elements = ['whitepaper', 'roadmap', 'team', 'tokenomics', 'audit']
                     
                     for element in essential_elements:
                         if element in html_lower:
-                            essential_elements[element] = True
+                            essential_score += 1
                     
-                    missing = [k for k, v in essential_elements.items() if not v]
-                    if len(missing) >= 3:
-                        logger.warning(f"⚠️ Site {url}: Éléments manquants: {missing}")
-                        return False, f"MISSING ESSENTIALS: {', '.join(missing)}"
+                    if essential_score == 0:
+                        logger.warning(f"⚠️ Site {url}: Aucun élément essentiel trouvé")
+                        # Non bloquant pour projets très early
                     
                     # 6. VÉRIFICATION LIENS SOCIAUX
-                    social_links = ['twitter.com', 't.me', 'github.com', 'discord']
+                    social_links = ['twitter.com', 't.me', 'github.com', 'discord', 'medium.com']
                     social_count = sum(1 for link in social_links if link in html_lower)
                     
-                    if social_count < 2:
-                        logger.warning(f"⚠️ Site {url}: Trop peu de liens sociaux ({social_count}/4)")
-                        return False, "INSUFFICIENT SOCIAL LINKS"
+                    if social_count < 1:
+                        logger.warning(f"⚠️ Site {url}: Peu de liens sociaux ({social_count}/5)")
+                        # Non bloquant
                     
-                    # 7. CHECK SCAM DB
-                    scam_ok, scam_msg = await self.check_cryptoscamdb(url)
-                    if not scam_ok:
-                        return False, scam_msg
+                    # 7. CHECK SCAM DB (non bloquant)
+                    try:
+                        scam_ok, scam_msg = await self.check_cryptoscamdb(url)
+                        if not scam_ok:
+                            logger.error(f"🚨 Site {url}: Listé dans CryptoScamDB!")
+                            return False, scam_msg
+                    except:
+                        pass  # Si API down, ne bloque pas
                     
-                    logger.info(f"✅ Site {url}: Toutes vérifications passées")
+                    logger.info(f"✅ Site {url}: Vérifications passées (crypto={crypto_count}, social={social_count})")
                     return True, "WEBSITE VERIFIED"
         
         except Exception as e:
@@ -931,14 +943,14 @@ class QuantumScannerAntiScamUltimate:
         score = self.calculate_ultimate_score(projet)
         projet['score'] = score
         
-        # 11. DÉCISION GO/NOGO ULTRA-STRICTE
+        # 11. DÉCISION GO/NOGO ASSOUPLIE
         go_decision = (
             site_ok and twitter_ok and scam_ok and
             projet.get('mc', 0) <= self.MAX_MC and
-            score >= 70 and  # Seuil strict
-            followers >= 1000 and  # Minimum Twitter
-            (commits >= 10 or projet.get('launchpad_verified')) and  # GitHub OU launchpad vérifié
-            len(projet.get('vcs', [])) >= 1  # Au moins 1 VC légitime
+            score >= 60 and  # Seuil ABAISSÉ de 70 à 60
+            followers >= 500 and  # ABAISSÉ de 1000 à 500
+            (commits >= 5 or projet.get('launchpad_verified')) and  # ABAISSÉ de 10 à 5
+            len(projet.get('vcs', [])) >= 1  # Minimum 1 VC
         )
         
         if not go_decision:
