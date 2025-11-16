@@ -11,7 +11,6 @@ from typing import Dict, Any, List, Optional
 
 import aiohttp
 import requests
-import whois
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
@@ -33,6 +32,13 @@ try:
     from botocore.exceptions import BotoCoreError
 except Exception:
     boto3 = None
+
+# Optional whois with fallback
+try:
+    import whois
+except Exception:
+    whois = None
+    logging.warning("Module whois non disponible - certaines vérifications seront limitées")
 
 # Load env
 load_dotenv()
@@ -192,13 +198,19 @@ def domain_name_from_url(url: str) -> str:
         return url
 
 def whois_age_days(domain: str) -> Optional[int]:
+    """WHOIS domain age check with fallback if module not available"""
     try:
+        if whois is None:
+            log.warning("Module whois non disponible - vérification d'âge ignorée")
+            return None
+            
         w = whois.whois(domain)
         created = w.creation_date
         if isinstance(created, list): created = created[0]
         if not created: return None
         return (datetime.utcnow() - created).days
-    except Exception:
+    except Exception as e:
+        log.warning(f"Erreur WHOIS pour {domain}: {e}")
         return None
 
 def check_ssl(domain: str) -> Dict[str,Any]:
@@ -437,6 +449,35 @@ async def parse_project_page(link: str, session: aiohttp.ClientSession) -> Dict[
     except Exception:
         log.exception("parse_project_page failed for %s", link)
         return out
+
+# -----------------------
+# Missing function implementations
+# -----------------------
+async def github_check(github_url: str, session: aiohttp.ClientSession) -> tuple:
+    """Check if GitHub repo exists and has content"""
+    try:
+        # Convert to API URL
+        if "github.com" in github_url:
+            repo_path = github_url.split("github.com/")[-1].strip("/")
+            api_url = f"https://api.github.com/repos/{repo_path}"
+            st, txt = await async_http_get(session, api_url)
+            if st == 200:
+                data = json.loads(txt)
+                return True, {"size": data.get("size", 0), "stars": data.get("stargazers_count", 0)}
+        return False, {"error": "Not found or inaccessible"}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+async def coingecko_lookup(query: str, session: aiohttp.ClientSession) -> Optional[Dict]:
+    """Lookup token on CoinGecko"""
+    try:
+        url = f"https://api.coingecko.com/api/v3/coins/{query.lower()}"
+        st, txt = await async_http_get(session, url)
+        if st == 200:
+            return json.loads(txt)
+        return None
+    except Exception:
+        return None
 
 # -----------------------
 # Scoring / verification pipeline
