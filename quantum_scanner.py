@@ -1,457 +1,668 @@
-# QUANTUM_SCANNER_REEL_VERIFIE.py
-import aiohttp
-import asyncio
-import sqlite3
-import time
-import json
-import re
-import os
-import logging
+# quantum_all_in_one.py
+"""
+Quantum All-in-One Scanner Ultime
+- Single-file deployable scanner for launchpads + antiscam + LP-lock detection + CI artifacts
+- Configure via .env and config.yml
+"""
+import os, re, sys, json, ssl, socket, sqlite3, logging, asyncio, time, traceback
 from datetime import datetime
+from urllib.parse import urlparse, urljoin
+from typing import Dict, Any, List, Optional
+
+import aiohttp
+import requests
+import whois
 from bs4 import BeautifulSoup
-from telegram import Bot
 from dotenv import load_dotenv
 
+# Optional libs (may be absent) are imported lazily
+try:
+    from web3 import Web3
+except Exception:
+    Web3 = None
+
+# Optional Telegram
+try:
+    from telegram import Bot
+except Exception:
+    Bot = None
+
+# Optional boto3 for S3
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError
+except Exception:
+    boto3 = None
+
+# Load env
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.ERROR,  # Changé en ERROR pour voir seulement les vrais problèmes
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('quantum_scanner_verifie.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# -----------------------
+# Configuration
+# -----------------------
+# Env / config defaults
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_PUBLIC = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_REVIEW = os.getenv("TELEGRAM_CHAT_REVIEW", TELEGRAM_CHAT_PUBLIC)
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY")
+INFURA_URL = os.getenv("INFURA_URL")
+COINLIST_API_KEY = os.getenv("COINLIST_API_KEY")
+CRYPTOSCAMDB_API = os.getenv("CRYPTOSCAMDB_API", "https://api.cryptoscamdb.org/v1/lookup/")
+VIRUSTOTAL_KEY = os.getenv("VIRUSTOTAL_KEY")
+AWS_S3_BUCKET = os.getenv("S3_BUCKET")
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
-class QuantumScannerVerifie:
-    def __init__(self):
-        self.bot = Bot(token=os.getenv('TELEGRAM_BOT_TOKEN'))
-        self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        self.MAX_MC = 100000
-        self.session = None
-        self.init_db()
-        logger.error("🔴 SCANNER AVEC VÉRIFICATIONS RÉELLES INITIALISÉ!")
+MAX_MARKET_CAP_EUR = float(os.getenv("MAX_MARKET_CAP_EUR", "621000"))
+SCAN_INTERVAL_HOURS = float(os.getenv("SCAN_INTERVAL_HOURS", "6"))
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))
+DB_PATH = os.getenv("QUANTUM_DB", "quantum_all.db")
+LOCKERS_PATH = os.getenv("LOCKERS_JSON", "lockers.json")
+RESULTS_DIR = os.getenv("RESULTS_DIR", "results")
+LOGS_DIR = os.getenv("LOGS_DIR", "logs")
+MIN_DOMAIN_AGE_DAYS = int(os.getenv("MIN_DOMAIN_AGE_DAYS", "30"))
+MIN_LP_RESERVE_ETH = float(os.getenv("MIN_LP_RESERVE_ETH", "0.05"))
+GO_SCORE_THRESHOLD = float(os.getenv("GO_SCORE_THRESHOLD", "70"))
+REVIEW_SCORE_THRESHOLD = float(os.getenv("REVIEW_SCORE_THRESHOLD", "60"))
 
-    def init_db(self):
-        conn = sqlite3.connect('quantum_verifie.db')
-        conn.execute('''CREATE TABLE IF NOT EXISTS projects
-                      (id INTEGER PRIMARY KEY, name TEXT, symbol TEXT, mc REAL, price REAL,
-                       website TEXT, twitter TEXT, telegram TEXT, github TEXT, reddit TEXT, discord TEXT,
-                       site_ok BOOLEAN, twitter_ok BOOLEAN, telegram_ok BOOLEAN, github_ok BOOLEAN,
-                       reddit_ok BOOLEAN, discord_ok BOOLEAN,
-                       twitter_followers INTEGER, telegram_members INTEGER, github_commits INTEGER,
-                       reddit_members INTEGER, discord_members INTEGER,
-                       vcs TEXT, score REAL, ratio_analysis TEXT, historical_data TEXT,
-                       ico_status TEXT, early_stage BOOLEAN, created_at DATETIME)''')
-        conn.commit()
-        conn.close()
+# create dirs
+os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
 
-    async def get_session(self):
-        if self.session is None:
-            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
-        return self.session
+# -----------------------
+# Logging
+# -----------------------
+log = logging.getLogger("quantum_all_in_one")
+log.setLevel(logging.INFO)
+fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+fh = logging.FileHandler(os.path.join(LOGS_DIR, f"scan-{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.log"))
+fh.setFormatter(fmt)
+log.addHandler(fh)
+sh = logging.StreamHandler(sys.stdout)
+sh.setFormatter(fmt)
+log.addHandler(sh)
 
-    # ============= VÉRIFICATIONS RÉELLES DES LIENS =============
+# -----------------------
+# Services init
+# -----------------------
+TELEGRAM_BOT = Bot(token=TELEGRAM_BOT_TOKEN) if (Bot and TELEGRAM_BOT_TOKEN) else None
+W3 = Web3(Web3.HTTPProvider(INFURA_URL)) if (Web3 and INFURA_URL) else None
+S3_CLIENT = None
+if boto3 and AWS_ACCESS_KEY and AWS_SECRET_KEY and AWS_S3_BUCKET:
+    S3_CLIENT = boto3.client("s3", aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
 
-    async def verifier_twitter_reel(self, url):
-        """Vérifie RÉELLEMENT si le compte Twitter existe et est actif"""
+# -----------------------
+# DB / Cache helpers
+# -----------------------
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT, symbol TEXT, mc REAL, website TEXT, twitter TEXT, telegram TEXT, github TEXT, pair_address TEXT, verdict TEXT, score REAL, report TEXT, created_at TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS blacklists (source TEXT PRIMARY KEY, data TEXT, updated_at TEXT)""")
+    conn.commit(); conn.close()
+
+def cache_get(key: str) -> Optional[Any]:
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("SELECT value, updated_at FROM cache WHERE key=?", (key,))
+    r = cur.fetchone(); conn.close()
+    if not r: return None
+    value, updated_at = r
+    try:
+        if (datetime.utcnow() - datetime.fromisoformat(updated_at)).total_seconds() > CACHE_TTL_SECONDS:
+            return None
+    except Exception:
+        return None
+    try:
+        return json.loads(value)
+    except:
+        return None
+
+def cache_set(key: str, value: Any):
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("REPLACE INTO cache (key, value, updated_at) VALUES (?,?,?)", (key, json.dumps(value), datetime.utcnow().isoformat()))
+    conn.commit(); conn.close()
+
+def save_project_row(proj: Dict[str, Any], verdict: str, score: float, report: Dict[str,Any]):
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    cur.execute("""INSERT INTO projects (name,symbol,mc,website,twitter,telegram,github,pair_address,verdict,score,report,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (proj.get("nom"), proj.get("symbol"), proj.get("mc"), proj.get("website"), proj.get("twitter"), proj.get("telegram"), proj.get("github"), proj.get("pair_address"), verdict, float(score), json.dumps(report), datetime.utcnow().isoformat()))
+    conn.commit(); conn.close()
+
+# -----------------------
+# HTTP helpers
+# -----------------------
+async def async_http_get(session: aiohttp.ClientSession, url: str, *, headers=None, timeout=15):
+    headers = headers or {"User-Agent":"QuantumScanner/1.0"}
+    try:
+        async with session.get(url, timeout=timeout, headers=headers) as resp:
+            text = await resp.text(errors="ignore")
+            return resp.status, text
+    except Exception as e:
+        return None, str(e)
+
+def http_get_blocking(url: str, timeout=12):
+    headers = {"User-Agent":"QuantumScanner/1.0"}
+    try:
+        r = requests.get(url, timeout=timeout, headers=headers)
+        return r.status_code, r.text
+    except Exception as e:
+        return None, str(e)
+
+# -----------------------
+# Locker scraping & population
+# -----------------------
+LOCKER_SOURCES = [
+    "https://www.dx.app/dxsale",
+    "https://www.team.finance/view-all-coins",
+    "https://app.uncx.network/stealth/explore"
+]
+
+def extract_addresses(text: str) -> List[str]:
+    return list({m.group(0).lower() for m in re.finditer(r"0x[a-fA-F0-9]{40}", text)})
+
+def populate_lockers() -> List[str]:
+    addresses = set()
+    for url in LOCKER_SOURCES:
         try:
-            session = await self.get_session()
-            async with session.get(url, timeout=10, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }) as response:
-                content = await response.text()
-                
-                # Vérifications RÉELLES
-                if response.status == 200:
-                    if "compte suspendu" in content.lower() or "suspended" in content.lower():
-                        return False, "COMPTE SUSPENDU", 0
-                    elif "cette page n'existe pas" in content.lower() or "doesn't exist" in content.lower():
-                        return False, "COMPTE INEXISTANT", 0
-                    else:
-                        # Essayer d'extraire le nombre d'abonnés
-                        followers_match = re.search(r'(\d+(?:\.\d+)?[KM]?)\s*[a-zA-Z]*\s*[a-zA-Z]*\s*[a-zA-Z]*\s*[a-zA-Z]*\s*[a-zA-Z]*\s*[a-zA-Z]*abonnés', content)
-                        if followers_match:
-                            followers = self.convert_followers_to_number(followers_match.group(1))
-                            return True, "ACTIF", followers
-                        return True, "ACTIF (followers non détectés)", 0
-                else:
-                    return False, f"ERREUR HTTP {response.status}", 0
-                    
+            code, txt = http_get_blocking(url)
+            if code and code == 200 and txt:
+                addrs = extract_addresses(txt)
+                addresses.update(addrs)
+                log.info("Scraped %d addresses from %s", len(addrs), url)
         except Exception as e:
-            return False, f"ERREUR: {str(e)}", 0
+            log.exception("Locker scrape error %s: %s", url, e)
+    # write lockers.json
+    try:
+        with open(LOCKERS_PATH, "w", encoding="utf-8") as f:
+            json.dump(sorted(list(addresses)), f, indent=2)
+        log.info("Wrote %s with %d lockers", LOCKERS_PATH, len(addresses))
+    except Exception:
+        log.exception("Failed to write lockers.json")
+    return sorted(list(addresses))
 
-    async def verifier_reddit_reel(self, url):
-        """Vérifie RÉELLEMENT si le subreddit existe"""
-        try:
-            session = await self.get_session()
-            async with session.get(url, timeout=10, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }) as response:
-                content = await response.text()
-                
-                if response.status == 200:
-                    if "n'a pas pu trouver" in content or "couldn't find" in content or "Aucun contenu" in content:
-                        return False, "SUBREDDIT INEXISTANT", 0
-                    else:
-                        # Essayer d'extraire le nombre de membres
-                        members_match = re.search(r'(\d+(?:\.\d+)?[KM]?)\s*membres', content)
-                        if members_match:
-                            members = self.convert_followers_to_number(members_match.group(1))
-                            return True, "ACTIF", members
-                        return True, "ACTIF (membres non détectés)", 0
-                else:
-                    return False, f"ERREUR HTTP {response.status}", 0
-                    
-        except Exception as e:
-            return False, f"ERREUR: {str(e)}", 0
+# -----------------------
+# Basic site/verif helpers
+# -----------------------
+def domain_name_from_url(url: str) -> str:
+    try:
+        return urlparse(url).hostname or url
+    except:
+        return url
 
-    async def verifier_telegram_reel(self, url):
-        """Vérifie si le lien Telegram est accessible"""
-        try:
-            session = await self.get_session()
-            async with session.get(url, timeout=10, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }) as response:
-                if response.status == 200:
-                    return True, "ACTIF", 0  # Impossible de compter les membres sans API
-                else:
-                    return False, f"ERREUR HTTP {response.status}", 0
-        except Exception as e:
-            return False, f"ERREUR: {str(e)}", 0
+def whois_age_days(domain: str) -> Optional[int]:
+    try:
+        w = whois.whois(domain)
+        created = w.creation_date
+        if isinstance(created, list): created = created[0]
+        if not created: return None
+        return (datetime.utcnow() - created).days
+    except Exception:
+        return None
 
-    async def verifier_github_reel(self, url):
-        """Vérifie si le GitHub existe et compte les commits"""
-        try:
-            session = await self.get_session()
-            async with session.get(url, timeout=10, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }) as response:
-                if response.status == 200:
-                    content = await response.text()
-                    # Compter approximativement les commits
-                    commits_count = content.count('commits') // 2
-                    return True, "ACTIF", commits_count
-                else:
-                    return False, f"ERREUR HTTP {response.status}", 0
-        except Exception as e:
-            return False, f"ERREUR: {str(e)}", 0
+def check_ssl(domain: str) -> Dict[str,Any]:
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((domain, 443), timeout=6) as sock:
+            with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
+                cert = ssock.getpeercert()
+                return {"ok": True, "notAfter": cert.get("notAfter")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
-    def convert_followers_to_number(self, followers_str):
-        """Convertit 1.2K, 5M en nombres"""
+# -----------------------
+# Etherscan / on-chain helpers
+# -----------------------
+async def etherscan_get_abi(address: str, session: aiohttp.ClientSession):
+    key = ETHERSCAN_API_KEY
+    if not key:
+        return False, None
+    ck = f"etherscan:abi:{address}"
+    cached = cache_get(ck)
+    if cached: return cached.get("ok", False), cached.get("abi")
+    url = f"https://api.etherscan.io/api?module=contract&action=getabi&address={address}&apikey={key}"
+    st, txt = await async_http_get(session, url)
+    if st == 200:
         try:
-            if 'K' in followers_str:
-                return int(float(followers_str.replace('K', '')) * 1000)
-            elif 'M' in followers_str:
-                return int(float(followers_str.replace('M', '')) * 1000000)
-            else:
-                return int(followers_str.replace(',', ''))
+            obj = json.loads(txt)
+            if obj.get("status") == "1":
+                abi = json.loads(obj.get("result"))
+                cache_set(ck, {"ok":True, "abi":abi})
+                return True, abi
+        except Exception:
+            pass
+    cache_set(ck, {"ok":False})
+    return False, None
+
+def analyze_contract_onchain(address: str) -> Dict[str,Any]:
+    if not W3:
+        return {"error":"no-web3"}
+    try:
+        erc20 = [{"constant":True,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}]
+        token = W3.eth.contract(address=W3.toChecksumAddress(address), abi=erc20)
+        total = token.functions.totalSupply().call()
+        try:
+            dec = token.functions.decimals().call()
         except:
-            return 0
+            dec = None
+        return {"totalSupply": total, "decimals": dec}
+    except Exception as e:
+        return {"error": str(e)}
 
-    # ============= PROJETS AVEC LIENS RÉELS ET VÉRIFIÉS =============
+UNISWAP_PAIR_ABI = [
+    {"constant":True,"inputs":[],"name":"getReserves","outputs":[{"name":"_reserve0","type":"uint112"},{"name":"_reserve1","type":"uint112"},{"name":"_blockTimestampLast","type":"uint32"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"token0","outputs":[{"name":"","type":"address"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"token1","outputs":[{"name":"","type":"address"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"owner","outputs":[{"name":"","type":"address"}],"type":"function"}
+]
 
-    async def get_projets_verifies(self):
-        """Retourne seulement des projets avec des liens RÉELS et VÉRIFIABLES"""
-        return [
-            {
-                'nom': 'Starknet',
-                'symbol': 'STRK',
-                'mc': 880000000,  # MC réelle
-                'price': 0.85,
-                'website': 'https://starknet.io',
-                'twitter': 'https://twitter.com/Starknet',
-                'telegram': 'https://t.me/StarkWareLtd',
-                'github': 'https://github.com/starkware-libs',
-                'reddit': 'https://www.reddit.com/r/starknet/',
-                'discord': 'https://discord.gg/qYP8u4re5Q',
-                'vcs': ['Paradigm', 'Sequoia', 'Pantera Capital'],
-                'blockchain': 'Starknet',
-                'description': 'ZK-Rollup scaling solution for Ethereum',
-                'category': 'Layer 2',
-                'ico_price': 0.35,
-                'launch_date': '2024-02-20'
-            },
-            {
-                'nom': 'Arbitrum',
-                'symbol': 'ARB',
-                'mc': 9500000000,
-                'price': 0.95,
-                'website': 'https://arbitrum.io',
-                'twitter': 'https://twitter.com/arbitrum',
-                'telegram': 'https://t.me/arbitrum',
-                'github': 'https://github.com/OffchainLabs',
-                'reddit': 'https://www.reddit.com/r/Arbitrum/',
-                'discord': 'https://discord.gg/arbitrum',
-                'vcs': ['Pantera Capital', 'Alameda Research'],
-                'blockchain': 'Ethereum L2',
-                'description': 'Ethereum L2 scaling solution',
-                'category': 'Layer 2',
-                'ico_price': 0.60,
-                'launch_date': '2023-03-23'
-            }
-        ]
-
-    # ============= ANALYSE AVEC VÉRIFICATIONS RÉELLES =============
-
-    async def analyser_projet_verifie(self, projet):
-        """Analyse avec VÉRIFICATIONS RÉELLES de tous les liens"""
-        
-        logger.error(f"🔍 VÉRIFICATION RÉELLE DE {projet['nom']}")
-        
-        # Vérifications RÉELLES de tous les liens
-        twitter_ok, twitter_msg, twitter_followers = await self.verifier_twitter_reel(projet['twitter'])
-        reddit_ok, reddit_msg, reddit_members = await self.verifier_reddit_reel(projet['reddit'])
-        telegram_ok, telegram_msg, _ = await self.verifier_telegram_reel(projet['telegram'])
-        github_ok, github_msg, github_commits = await self.verifier_github_reel(projet['github'])
-        
-        # Vérification site web
-        site_ok, site_msg = await self.verifier_lien_reel(projet['website'])
-        
-        # Score BASÉ SUR LA RÉALITÉ
-        score = 50  # Base
-        
-        # Bonus pour liens RÉELLEMENT actifs
-        if site_ok: score += 10
-        if twitter_ok and twitter_followers > 1000: score += 15
-        if reddit_ok and reddit_members > 100: score += 10
-        if telegram_ok: score += 5
-        if github_ok and github_commits > 10: score += 10
-        
-        # Vérification MC réaliste
-        if projet['mc'] > 1000000000:  # >1B = mature
-            score -= 10
-        
-        # Décision BASÉE SUR LA RÉALITÉ
-        go_decision = (
-            site_ok and 
-            twitter_ok and 
-            score >= 60 and
-            projet['mc'] <= 500000000  # Seulement petits MC
-        )
-        
-        if not go_decision:
-            raison = f"REJET: site_ok:{site_ok} twitter_ok:{twitter_ok} score:{score} mc:{projet['mc']}"
-            logger.error(f"❌ {projet['nom']} - {raison}")
-            return None, raison
-        
-        # Résultat AVEC DONNÉES RÉELLES
-        resultat = {
-            'nom': projet['nom'],
-            'symbol': projet['symbol'],
-            'mc': projet['mc'],
-            'price': projet['price'],
-            'score': min(score, 100),  # MAX 100
-            'go_decision': go_decision,
-            
-            # Liens RÉELS
-            'website': projet['website'],
-            'twitter': projet['twitter'],
-            'telegram': projet['telegram'],
-            'github': projet['github'],
-            'reddit': projet['reddit'],
-            'discord': projet['discord'],
-            
-            # Données RÉELLES (pas inventées)
-            'twitter_followers': twitter_followers,
-            'telegram_members': 0,  # On ne peut pas compter sans API
-            'github_commits': github_commits,
-            'reddit_members': reddit_members,
-            'discord_members': 0,   # On ne peut pas compter sans API
-            
-            # Statuts RÉELS
-            'site_ok': site_ok,
-            'twitter_ok': twitter_ok,
-            'telegram_ok': telegram_ok,
-            'github_ok': github_ok,
-            'reddit_ok': reddit_ok,
-            'discord_ok': True,  # On vérifie pas Discord pour l'instant
-            
-            'vcs': projet['vcs'],
-            'blockchain': projet['blockchain'],
-            'description': projet['description'],
-            'messages_verification': {
-                'twitter': twitter_msg,
-                'reddit': reddit_msg,
-                'telegram': telegram_msg,
-                'github': github_msg,
-                'website': site_msg
-            }
-        }
-        
-        logger.error(f"✅ {projet['nom']} - PROJET VALIDÉ AVEC DONNÉES RÉELLES")
-        return resultat, "PROJET VÉRIFIÉ AVEC SUCCÈS"
-
-    async def verifier_lien_reel(self, url):
-        """Vérification basique de lien"""
+def inspect_pair(pair_address: str) -> Dict[str,Any]:
+    if not W3:
+        return {"error":"no-web3"}
+    try:
+        pair = W3.eth.contract(address=W3.toChecksumAddress(pair_address), abi=UNISWAP_PAIR_ABI)
         try:
-            session = await self.get_session()
-            async with session.get(url, timeout=10) as response:
-                return response.status == 200, f"HTTP {response.status}"
+            reserves = pair.functions.getReserves().call()
+            token0 = pair.functions.token0().call()
+            token1 = pair.functions.token1().call()
         except Exception as e:
-            return False, f"ERREUR: {str(e)}"
-
-    # ============= ALERTE AVEC VÉRITÉ =============
-
-    async def envoyer_alerte_verifiee(self, projet):
-        """Envoie une alerte avec UNIQUEMENT la VÉRITÉ"""
-        
-        # Calculs réalistes
-        current_price = projet['price']
-        target_price = current_price * 3  # x3 réaliste, pas x12
-        potential_percent = 200  # +200% réaliste
-        
-        message = f"""
-🔴 **QUANTUM SCANNER - RAPPORT VÉRIFIÉ** 🔴
-
-🏆 **{projet['nom']} ({projet['symbol']})**
-
-📊 **SCORE RÉEL: {projet['score']}/100**
-✅ **STATUT: {'GO' if projet['go_decision'] else 'NO-GO'}**
-⚡ **RISQUE: MOYEN**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **ANALYSE FINANCIÈRE RÉALISTE:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💵 **Prix actuel:** ${current_price:.4f}
-🎯 **Prix cible RÉALISTE:** ${target_price:.4f}
-📈 **Multiple RÉALISTE:** x3.0
-🚀 **Potentiel RÉALISTE:** +{potential_percent}%
-
-💰 **Market Cap:** {projet['mc']:,.0f}$
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🔍 **VÉRIFICATIONS RÉELLES:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🌐 **Site web:** {'✅' if projet['site_ok'] else '❌'} {projet['messages_verification']['website']}
-🐦 **Twitter/X:** {'✅' if projet['twitter_ok'] else '❌'} {projet['twitter_followers']:,} followers - {projet['messages_verification']['twitter']}
-✈️ **Telegram:** {'✅' if projet['telegram_ok'] else '❌'} {projet['messages_verification']['telegram']}
-💻 **GitHub:** {'✅' if projet['github_ok'] else '❌'} {projet['github_commits']} commits - {projet['messages_verification']['github']}
-🔴 **Reddit:** {'✅' if projet['reddit_ok'] else '❌'} {projet['reddit_members']:,} membres - {projet['messages_verification']['reddit']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ **ATTENTION - DONNÉES RÉELLES:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Ce rapport contient UNIQUEMENT des données VÉRIFIÉES.
-Les métriques sociales sont EXTRITES EN TEMPS RÉEL.
-Les scores sont CALCULÉS sur des critères RÉELS.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 **LIENS VÉRIFIÉS:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-• [Site Web]({projet['website']})
-• [Twitter/X]({projet['twitter']})
-• [Telegram]({projet['telegram']})
-• [GitHub]({projet['github']})
-• [Reddit]({projet['reddit']})
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 **DESCRIPTION:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{projet['description']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ **RECOMMANDATION RÉALISTE:**
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💎 **Confiance:** {projet['score']}%
-🎯 **Potentiel:** x3.0 (+{potential_percent}%)
-📈 **Période:** 12-18 mois
-💰 **Allocation:** 1-3% du portfolio
-
-#QuantumScanner #Vérifié #DonnéesRéelles
-"""
-        
+            return {"error": str(e)}
+        owner = None
         try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode='Markdown',
-                disable_web_page_preview=False
-            )
-            logger.error(f"📤 ALERTE VÉRIFIÉE envoyée pour {projet['symbol']}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ ERREUR envoi Telegram: {e}")
-            return False
+            owner = pair.functions.owner().call()
+        except:
+            owner = None
+        return {"reserve0": reserves[0], "reserve1": reserves[1], "token0": token0, "token1": token1, "owner": owner}
+    except Exception as e:
+        return {"error": str(e)}
 
-    # ============= SCAN VÉRIFIÉ =============
+# -----------------------
+# Locker detection & helpers (checks unicrypt / team.finance single pair)
+# -----------------------
+def check_unicrypt_pair(pair_address: str) -> Optional[Dict[str,Any]]:
+    url = f"https://app.unicrypt.network/amm/lock/{pair_address}"
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent":"QuantumScanner/1.0"})
+        if r.status_code == 200 and ("locked" in r.text.lower() or "liquidity lock" in r.text.lower()):
+            return {"source":"unicrypt","url":url}
+    except Exception:
+        pass
+    return None
 
-    async def run_scan_verifie(self):
-        """Lance un scan avec VÉRIFICATIONS RÉELLES"""
-        
-        start_time = time.time()
-        
+def check_teamfinance_pair(pair_address: str) -> Optional[Dict[str,Any]]:
+    url = f"https://team.finance/lock/{pair_address}"
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent":"QuantumScanner/1.0"})
+        if r.status_code == 200 and ("lock" in r.text.lower() or "locked" in r.text.lower()):
+            return {"source":"teamfinance","url":url}
+    except Exception:
+        pass
+    return None
+
+def detect_lp_lock(pair_address: str, lockers_set: set) -> Dict[str,Any]:
+    info = {}
+    if not pair_address:
+        return {"error":"no_pair_address"}
+    onchain = inspect_pair(pair_address)
+    info["onchain"] = onchain
+    owner = (onchain.get("owner") or "").lower() if onchain.get("owner") else None
+    if owner and owner in lockers_set:
+        info["locked_by_known_locker"] = True
+        info["locker_owner"] = owner
+        return info
+    # try unicrypt/teamfinance
+    unicrypt = check_unicrypt_pair(pair_address)
+    if unicrypt:
+        info["locked_by_unicrypt"] = True
+        info["unicrypt"] = unicrypt
+        return info
+    team = check_teamfinance_pair(pair_address)
+    if team:
+        info["locked_by_teamfinance"] = True
+        info["teamfinance"] = team
+        return info
+    info["locked_by_known_locker"] = False
+    return info
+
+# -----------------------
+# Blacklist updater
+# -----------------------
+BLACKLIST_SOURCES = {
+    "metamask_phishing": "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json",
+    "cryptoscamdb_list": "https://raw.githubusercontent.com/cryptoscamdb/list/master/data.json"
+}
+def update_blacklists():
+    conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+    for key, url in BLACKLIST_SOURCES.items():
         try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text="🔴 **QUANTUM SCANNER - SCAN VÉRIFIÉ**\n\n"
-                     "🛑 ARRÊT DES DONNÉES INVENTÉES\n"
-                     "✅ VÉRIFICATION RÉELLE de tous les liens\n"
-                     "📊 SCORING BASÉ sur la réalité\n"
-                     "⚠️ SEULS les projets VÉRIFIABLES\n\n"
-                     "🔍 Vérification en cours...",
-                parse_mode='Markdown'
-            )
-            
-            projects = await self.get_projets_verifies()
-            verified_count = 0
-            
-            for projet in projects:
-                logger.error(f"🔍 VÉRIFICATION EN COURS: {projet['nom']}")
-                
-                resultat, message = await self.analyser_projet_verifie(projet)
-                
-                if resultat and resultat['go_decision']:
-                    succes = await self.envoyer_alerte_verifiee(resultat)
-                    if succes:
-                        verified_count += 1
-                    await asyncio.sleep(5)  # Anti-spam
-                else:
-                    logger.error(f"❌ REJETÉ: {projet['nom']} - {message}")
-            
-            # Rapport FINAL HONNÊTE
-            duree = time.time() - start_time
-            rapport = f"""
-🔴 **SCAN VÉRIFIÉ TERMINÉ** 🔴
+            r = requests.get(url, timeout=12, headers={"User-Agent":"QuantumScanner/1.0"})
+            if r.status_code == 200:
+                cur.execute("REPLACE INTO blacklists (source, data, updated_at) VALUES (?,?,?)", (key, r.text, datetime.utcnow().isoformat()))
+                log.info("Updated blacklist %s (%d bytes)", key, len(r.text))
+        except Exception:
+            log.exception("Failed to update blacklist %s", key)
+    conn.commit(); conn.close()
 
-📊 **RAPPORT HONNÊTE:**
-✅ **Projets validés:** {verified_count}
-❌ **Projets rejetés:** {len(projects) - verified_count}
-⏱️ **Durée:** {duree:.1f}s
+def is_in_blacklists(value: str) -> bool:
+    try:
+        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
+        cur.execute("SELECT data FROM blacklists")
+        rows = cur.fetchall(); conn.close()
+        for (data,) in rows:
+            if data and value.lower() in data.lower():
+                return True
+    except Exception:
+        pass
+    return False
 
-⚠️ **ATTENTION:**
-Les données précédentes contenaient des erreurs.
-Ce scan utilise UNIQUEMENT des données VÉRIFIÉES.
+# -----------------------
+# Launchpad fetchers + parsers
+# -----------------------
+async def fetch_coinlist(session: aiohttp.ClientSession):
+    if not COINLIST_API_KEY:
+        return []
+    url = "https://api.coinlist.co/public/sales"
+    headers = {"Authorization": f"Bearer {COINLIST_API_KEY}"}
+    st, txt = await async_http_get(session, url, headers=headers)
+    projects = []
+    if st == 200 and txt:
+        try:
+            data = json.loads(txt)
+            for it in data.get("data", []):
+                projects.append({"nom": it.get("name") or it.get("title"), "link": it.get("url") or it.get("website"), "source":"coinlist"})
+        except Exception:
+            log.exception("CoinList parse error")
+    return projects
 
-🔄 **Prochain scan dans 24h**
-"""
-            
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=rapport,
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            logger.error(f"💥 ERREUR CRITIQUE: {e}")
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=f"🔴 **ERREUR SCAN VÉRIFIÉ**\n\n{str(e)}",
-                parse_mode='Markdown'
-            )
+async def fetch_binance(session: aiohttp.ClientSession):
+    url = "https://www.binance.com/en/support/announcement/c-48"
+    st, txt = await async_http_get(session, url)
+    projects = []
+    if st == 200 and txt:
+        soup = BeautifulSoup(txt, "html.parser")
+        for a in soup.find_all("a", href=True):
+            name = (a.get_text() or "").strip()
+            href = a["href"]
+            if name and len(name) > 2:
+                if href.startswith("/"):
+                    parsed = urlparse(url); href = f"{parsed.scheme}://{parsed.netloc}{href}"
+                projects.append({"nom": name, "link": href, "source": "binance"})
+    return projects
 
-# ============= LANCEMENT =============
+async def fetch_polkastarter(session: aiohttp.ClientSession):
+    url = "https://www.polkastarter.com/projects"
+    st, txt = await async_http_get(session, url)
+    projects = []
+    if st == 200 and txt:
+        soup = BeautifulSoup(txt, "html.parser")
+        for a in soup.find_all("a", href=True)[:60]:
+            name = (a.get_text() or "").strip()
+            href = a["href"]
+            if name and len(name) > 2:
+                if href.startswith("/"):
+                    parsed = urlparse(url); href = f"{parsed.scheme}://{parsed.netloc}{href}"
+                projects.append({"nom": name, "link": href, "source": "polkastarter"})
+    return projects
 
-async def main():
-    scanner = QuantumScannerVerifie()
-    await scanner.run_scan_verifie()
+# Parsers for project pages
+async def parse_project_page(link: str, session: aiohttp.ClientSession) -> Dict[str,Any]:
+    out = {"website":"", "twitter":"", "telegram":"", "github":"", "contract_address":"", "pair_address":""}
+    try:
+        st, txt = await async_http_get(session, link)
+        if st != 200 or not txt:
+            return out
+        soup = BeautifulSoup(txt, "html.parser")
+        # find external social links
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if "twitter.com" in href and not out["twitter"]:
+                out["twitter"] = href.split("?")[0]
+            if "t.me" in href and not out["telegram"]:
+                out["telegram"] = href.split("?")[0]
+            if "github.com" in href and not out["github"]:
+                out["github"] = "/".join(href.split("github.com/")[-1].split("/")[:2])
+            if href.startswith("http") and not out["website"] and (link.split("//")[-1].split("/")[0] not in href):
+                out["website"] = href
+        # contract / pair detection in page text
+        text = soup.get_text(" ", strip=True)
+        m = re.search(r"0x[a-fA-F0-9]{40}", text)
+        if m:
+            out["contract_address"] = m.group(0)
+        # pair heuristics: look for 'pair' + 0x...
+        m2 = re.search(r"pair[:\s]*0x[a-fA-F0-9]{40}", text, flags=re.I)
+        if m2:
+            out["pair_address"] = re.search(r"0x[a-fA-F0-9]{40}", m2.group(0)).group(0)
+        return out
+    except Exception:
+        log.exception("parse_project_page failed for %s", link)
+        return out
 
+# -----------------------
+# Scoring / verification pipeline
+# -----------------------
+async def verify_and_score(proj: Dict[str,Any], lockers_set: set, session: aiohttp.ClientSession) -> Dict[str,Any]:
+    report = {"checks":{}, "flags":[]}
+    # site content
+    website = proj.get("website")
+    if not website:
+        report["flags"].append(("site_missing", {})); return {"verdict":"REJECT","score":0,"report":report}
+    ok_site, site_info = await quick_site_content_check_async(session, website)
+    report["checks"]["site"] = site_info
+    if not ok_site:
+        report["flags"].append(("site_bad", site_info)); return {"verdict":"REJECT","score":0,"report":report}
+    # whois/ssl
+    host = domain_name_from_url(website)
+    age = whois_age_days(host)
+    report["checks"]["whois"] = {"age_days": age}
+    if age is None or age < MIN_DOMAIN_AGE_DAYS:
+        report["flags"].append(("domain_young", {"age_days": age}))
+    report["checks"]["ssl"] = check_ssl(host)
+    # blacklist crosscheck
+    if is_in_blacklists(host):
+        report["flags"].append(("in_blacklist", {"host": host})); return {"verdict":"REJECT","score":0,"report":report}
+    # contract checks
+    addr = proj.get("contract_address")
+    if addr:
+        good_abi, abi = await etherscan_get_abi(addr, session)
+        report["checks"]["etherscan_verified"] = good_abi
+        if not good_abi:
+            report["flags"].append(("contract_not_verified", {})); return {"verdict":"REJECT","score":0,"report":report}
+        onchain = analyze_contract_onchain(addr)
+        report["checks"]["onchain"] = onchain
+        if "error" in onchain:
+            report["flags"].append(("onchain_error", onchain)); return {"verdict":"REJECT","score":0,"report":report}
+    # github
+    gh = proj.get("github")
+    if gh:
+        ok_g, ginfo = await github_check(gh, session); report["checks"]["github"] = ginfo
+        if not ok_g:
+            report["flags"].append(("github_missing_or_empty", ginfo))
+    # coingecko
+    cg = await coingecko_lookup(proj.get("contract_address") or proj.get("symbol") or proj.get("nom"), session)
+    report["checks"]["coingecko"] = bool(cg)
+    if not cg:
+        report["flags"].append(("not_listed_coingecko", {}))
+    # twitter
+    tw = proj.get("twitter")
+    if tw:
+        ok_t, tinfo = await twitter_public_check_async(session, tw)
+        report["checks"]["twitter"] = tinfo
+        if not ok_t:
+            report["flags"].append(("twitter_broken", tinfo)); return {"verdict":"REJECT","score":0,"report":report}
+    # telegram
+    tg = proj.get("telegram")
+    if tg:
+        st, txt = await async_http_get(session, tg)
+        if st != 200 or ("chat not found" in (txt or "").lower()):
+            report["flags"].append(("telegram_broken", {"status": st})); return {"verdict":"REJECT","score":0,"report":report}
+        report["checks"]["telegram"] = {"status": st}
+    # LP detection if pair provided
+    pair = proj.get("pair_address")
+    if pair:
+        lp_info = detect_lp_lock(pair, lockers_set)
+        report["checks"]["lp"] = lp_info
+        if lp_info.get("locked_by_known_locker") is False:
+            report["flags"].append(("lp_not_locked_or_unknown", lp_info))
+    # scoring simple
+    score = 100
+    if not report["checks"].get("coingecko"): score -= 25
+    if not report["checks"].get("github") or report["checks"]["github"].get("size",0) == 0: score -= 20
+    if (report["checks"].get("whois",{}).get("age_days") or 9999) < 90: score -= 15
+    if any(f[0]=="very_large_total_supply" for f in report["flags"]): score -= 10
+    verdict = "ACCEPT" if score >= GO_SCORE_THRESHOLD and float(proj.get("mc",0)) <= MAX_MARKET_CAP_EUR else ("REVIEW" if score >= REVIEW_SCORE_THRESHOLD else "REJECT")
+    return {"verdict": verdict, "score": score, "report": report}
+
+# Async thin wrappers
+async def quick_site_content_check_async(session, url):
+    try:
+        st, txt = await async_http_get(session, url)
+        if st != 200: return False, {"status": st}
+        lower = (txt or "").lower()
+        if any(k in lower for k in ['for sale','parked','buy this domain','domain for sale','404','not found']):
+            return False, {"reason":"parked_or_for_sale"}
+        stripped = re.sub(r'<[^>]+>', '', txt or '').strip()
+        if len(stripped) < 200: return False, {"reason":"too_little_content"}
+        return True, {"status":200, "len": len(stripped)}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+async def twitter_public_check_async(session, handle_or_url):
+    try:
+        handle = handle_or_url.split("/")[-1]
+        st, txt = await async_http_get(session, f"https://x.com/{handle}")
+        if st != 200: return False, {"status": st}
+        if "Account suspended" in (txt or "") or "suspended" in (txt or "").lower():
+            return False, {"reason":"suspended"}
+        return True, {"status":200}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+# -----------------------
+# Notifications & artifacts
+# -----------------------
+def send_telegram(chat_id: str, text: str):
+    if not TELEGRAM_BOT:
+        log.info("Telegram not configured; would send to %s: %s", chat_id, text)
+        return
+    try:
+        TELEGRAM_BOT.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+    except Exception:
+        log.exception("Telegram send failed")
+
+def write_results(results: List[Dict[str,Any]]):
+    fname = os.path.join(RESULTS_DIR, f"results-{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.json")
+    try:
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+        log.info("Wrote results %s (%d entries)", fname, len(results))
+        return fname
+    except Exception:
+        log.exception("Failed to write results file")
+        return None
+
+def upload_to_s3(path: str):
+    if not S3_CLIENT:
+        log.info("S3 not configured; skipping upload")
+        return False
+    try:
+        key = os.path.basename(path)
+        S3_CLIENT.upload_file(path, AWS_S3_BUCKET, key)
+        log.info("Uploaded %s to s3://%s/%s", path, AWS_S3_BUCKET, key)
+        return True
+    except Exception:
+        log.exception("S3 upload failed")
+        return False
+
+# -----------------------
+# Main scan orchestration
+# -----------------------
+async def run_scan_once(lockers_set: set):
+    results = []
+    async with aiohttp.ClientSession() as session:
+        # fetch candidates
+        candidates = []
+        try:
+            candidates += await fetch_coinlist(session)
+        except Exception:
+            log.exception("Coinlist fetch error")
+        try:
+            candidates += await fetch_binance(session)
+        except Exception:
+            log.exception("Binance fetch error")
+        try:
+            candidates += await fetch_polkastarter(session)
+        except Exception:
+            log.exception("Polkastarter fetch error")
+        # dedupe by name
+        uniq = []
+        seen = set()
+        for c in candidates:
+            key = (c.get("nom") or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key); uniq.append(c)
+        # enrich and analyze concurrently
+        sem = asyncio.Semaphore(6)
+        async def process_candidate(c):
+            async with sem:
+                try:
+                    info = await parse_project_page(c.get("link") or c.get("source"), session)
+                    proj = {"nom": c.get("nom"), "symbol": info.get("symbol","NEW"), "mc": c.get("mc", 0), "website": info.get("website") or c.get("link") or "", "twitter": info.get("twitter",""), "telegram": info.get("telegram",""), "github": info.get("github",""), "contract_address": info.get("contract_address",""), "pair_address": info.get("pair_address","")}
+                    res = await verify_and_score(proj, lockers_set, session)
+                    entry = {"proj": proj, "result": res}
+                    results.append(entry)
+                    # actions
+                    if res["verdict"] == "ACCEPT":
+                        msg = f"*ACCEPT* {proj.get('nom')} ({proj.get('symbol')})\nScore: {res['score']}\nSite: {proj.get('website')}"
+                        send_telegram(TELEGRAM_CHAT_PUBLIC, msg)
+                    elif res["verdict"] == "REVIEW":
+                        msg = f"*REVIEW* {proj.get('nom')} ({proj.get('symbol')})\nScore: {res['score']}\nSite: {proj.get('website')}"
+                        send_telegram(TELEGRAM_CHAT_REVIEW, msg)
+                    save_project_row(proj, res["verdict"], res["score"], res["report"])
+                except Exception:
+                    log.exception("Candidate processing failed for %s", c.get("nom"))
+        await asyncio.gather(*(process_candidate(c) for c in uniq))
+    # write results artifact
+    path = write_results(results)
+    # upload lockers.json and results if S3 configured
+    if path:
+        upload_to_s3(path)
+    if os.path.exists(LOCKERS_PATH):
+        upload_to_s3(LOCKERS_PATH)
+    return results
+
+# -----------------------
+# Entrypoint & loop
+# -----------------------
+def main_loop(one_shot=False):
+    try:
+        init_db()
+        # populate blacklists
+        update_blacklists()
+        # populate known lockers
+        lockers = set(populate_lockers())
+        # run initial scan
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(run_scan_once(lockers))
+        if one_shot:
+            return
+        # continuous run
+        while True:
+            time.sleep(int(SCAN_INTERVAL_HOURS*3600))
+            try:
+                # refresh blacklists and lockers periodically
+                update_blacklists()
+                lockers = set(populate_lockers())
+                loop.run_until_complete(run_scan_once(lockers))
+            except Exception:
+                log.exception("Periodic scan error")
+                time.sleep(3600)
+    except KeyboardInterrupt:
+        log.info("Interrupted by user")
+    except Exception:
+        log.exception("Fatal error in main_loop")
+
+# CLI run
 if __name__ == "__main__":
-    asyncio.run(main())
+    one = "--once" in sys.argv or "--one-shot" in sys.argv
+    main_loop(one_shot=one)
