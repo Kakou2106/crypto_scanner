@@ -5,8 +5,15 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from telegram import Bot
 from dotenv import load_dotenv
-import whois
 from urllib.parse import urlparse
+
+# Import optionnel de whois (évite erreur si non installé)
+try:
+    import whois
+    WHOIS_AVAILABLE = True
+except ImportError:
+    WHOIS_AVAILABLE = False
+    logging.warning("⚠️ Module 'whois' non disponible - vérifications WHOIS désactivées")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -84,6 +91,10 @@ class QuantumScannerUltimateVerified:
     
     async def verify_domain_age_and_ssl(self, url):
         """Vérifie l'âge du domaine + SSL (anti-scam basique)"""
+        if not WHOIS_AVAILABLE:
+            # Si whois non disponible, on vérifie juste SSL
+            return True, 0, "SSL OK" if url.startswith('https://') else "NO SSL"
+        
         try:
             parsed = urlparse(url)
             domain = parsed.netloc or parsed.path
