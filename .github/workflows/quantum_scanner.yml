@@ -24,12 +24,11 @@ jobs:
     - name: "📦 Install dependencies"
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip list | grep aiosqlite
+        pip install aiohttp beautifulsoup4 pyyaml playwright
+        pip list
 
     - name: "⚙️ Install Playwright browsers"
       run: |
-        pip install playwright
         playwright install
 
     - name: "🔐 Load API secrets and config"
@@ -54,5 +53,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: scan-results
-        path: data/
+        path: |
+          data/
+          results/
         retention-days: 30

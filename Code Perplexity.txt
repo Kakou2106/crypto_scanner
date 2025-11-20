@@ -1,0 +1,244 @@
+Code Perplexity
+
+import asyncio
+import aiohttp
+import argparse
+import json
+import logging
+import os
+import sqlite3
+import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("QuantumScannerUltime")
+
+# --- Storage layer ---
+
+class Storage:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._create_tables()
+
+    def _create_tables(self):
+        c = self.conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS projects 
+                     (id INTEGER PRIMARY KEY, name TEXT, source TEXT, link TEXT, report JSON, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS scan_history 
+                     (id INTEGER PRIMARY KEY, project_id INTEGER, verdict TEXT, score REAL, details JSON, scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        self.conn.commit()
+
+    def save_scan_result(self, result: dict):
+        try:
+            c = self.conn.cursor()
+            c.execute("INSERT INTO projects (name, source, link, report) VALUES (?, ?, ?, ?)",
+                      (result.get('name'), result.get('source'), result.get('link'), json.dumps(result.get('report', {}))))
+            project_id = c.lastrowid
+            c.execute("INSERT INTO scan_history (project_id, verdict, score, details) VALUES (?, ?, ?, ?)",
+                      (project_id, result.get('verdict'), result.get('score'), json.dumps(result.get('reason', []))))
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving scan result: {e}")
+
+# --- Ratios calculation ---
+
+def mc_fdmc(market_cap, fdmc):
+    if fdmc == 0: 
+        return None, "undefined"
+    val = market_cap / fdmc
+    interp = "undervalued" if val < 0.5 else "overvalued" if val > 1 else "fairly valued"
+    return val, interp
+
+def circ_vs_total(circ_supply, total_supply):
+    if total_supply == 0:
+        return None, "undefined"
+    val = circ_supply / total_supply
+    interp = "low ratio: potential dilution risk" if val < 0.3 else "healthy circulating supply"
+    return val, interp
+
+# TODO[HUMAN] Implement remaining 19 ratios here
+
+def calculate_all_ratios(data):
+    ratios = {}
+    ratios['mc_fdmc'] = mc_fdmc(data.get('market_cap', 0), data.get('fdmc', 1))
+    ratios['circ_vs_total'] = circ_vs_total(data.get('circulating_supply', 0), data.get('total_supply', 1))
+    # ... add other ratios calculations here
+    return ratios
+
+# --- Alert system ---
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+REVIEW_CHAT_ID = os.getenv("TELEGRAM_CHAT_REVIEW")
+PUBLIC_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+async def send_alert(project_report: dict, channel_type="public"):
+    if not TELEGRAM_BOT_TOKEN:
+        logger.warning("Telegram bot token missing, alerts disabled.")
+        return
+
+    if channel_type == "public":
+        chat_id = PUBLIC_CHAT_ID
+    elif channel_type == "review":
+        chat_id = REVIEW_CHAT_ID
+    else:
+        logger.error("Unknown channel type for alert.")
+        return
+
+    if not chat_id:
+        logger.warning(f"Chat ID for channel {channel_type} missing.")
+        return
+
+    message = format_message(project_report)
+    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+    params = {
+        'chat_id': chat_id,
+        'text': message,
+        'parse_mode': 'Markdown'
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, params=params) as resp:
+            if resp.status != 200:
+                logger.error(f"Telegram API error: {resp.status}")
+            else:
+                logger.info(f"Alert sent to chat {chat_id}.")
+
+def format_message(report: dict) -> str:
+    header = f"🌌 QUANTUM SCAN ULTIME — {report.get('name','Unknown')} ({report.get('symbol','')})\n"
+    score_line = f"📊 SCORE: {int(report.get('score',0))}/100 | 🎯 DECISION: {report.get('verdict','')} | ⚡ RISK: LOW\n"
+    body = f"Market Cap: {report.get('market_cap','N/A')} EUR\n"
+    # TODO: Add compact table of all 21 ratios and critical flags + links + human recommendation
+    return header + score_line + body
+
+# --- Verifier ---
+
+async def verify_project(project: dict, config: dict) -> dict:
+    """
+    Enrich project, run critical anti-scam and financial checks, calculate ratios, determine verdict.
+    Return dict with keys: verdict, score, reason[], report.
+    """
+    report = {}
+    reasons = []
+    score = 0.0
+
+    # Critical checks examples
+    website = project.get('website')
+    if not website or len(website) < 20:
+        reasons.append('Website missing or too short')
+        verdict = 'REJECT'
+        score = 0
+        return {'verdict': verdict, 'score': score, 'reason': reasons, 'report': report}
+
+    # TODO[HUMAN] Implement full verification: contracts, socials, antiscam APIs, LP checks, tokenomics, etc.
+
+    # Calculate ratios example
+    # Mock data for demo; replace with real fetched data
+    data_for_ratios = {
+        'market_cap': project.get('market_cap', 100000),
+        'fdmc': project.get('fdmc', 200000),
+        'circulating_supply': project.get('circulating_supply', 50000),
+        'total_supply': project.get('total_supply', 100000),
+        # ...others
+    }
+    ratios = calculate_all_ratios(data_for_ratios)
+    report['ratios'] = ratios
+
+    # Simple scoring for demo
+    score = 75.0
+    verdict = 'REVIEW' if score < config.get('GO_SCORE', 70) else 'ACCEPT'
+
+    return {'verdict': verdict, 'score': score, 'reason': reasons, 'report': report,
+            'name': project.get('name'), 'symbol': project.get('symbol', ''),
+            'market_cap': data_for_ratios['market_cap'], 'source': project.get('source'), 'link': project.get('link')}
+
+# --- Source fetcher examples ---
+
+async def fetch_binance_launchpad():
+    # TODO[HUMAN] Implement actual fetching/parsing from Binance Launchpad announcements page
+    await asyncio.sleep(0.1)  # Simulate async wait
+    return [{
+        'name': 'Demo Binance Launchpad Project',
+        'symbol': 'DBLP',
+        'source': 'binance_launchpad',
+        'link': 'https://www.binance.com/en/support/announcement/c-48',
+        'website': 'https://demoproject.io',
+        'market_cap': 100000,
+        'fdmc': 150000,
+        'circulating_supply': 40000,
+        'total_supply': 100000
+    }]
+
+async def fetch_coinlist_sales():
+    # TODO[HUMAN] API or scraping CoinList sales page
+    await asyncio.sleep(0.1)
+    return [{
+        'name': 'Demo CoinList Sales Project',
+        'symbol': 'DCLS',
+        'source': 'coinlist_sales',
+        'link': 'https://coinlist.co/sales',
+        'website': 'https://cointest.io',
+        'market_cap': 80000,
+        'fdmc': 100000,
+        'circulating_supply': 30000,
+        'total_supply': 90000
+    }]
+
+# --- Core scanner class ---
+
+class QuantumScanner:
+    def __init__(self, config, storage: Storage):
+        self.config = config
+        self.storage = storage
+        self.sources = [
+            fetch_binance_launchpad,
+            fetch_coinlist_sales,
+            # TODO[HUMAN] Add other fetchers here
+        ]
+
+    async def fetch_projects_from_all_sources(self):
+        projects = []
+        for source_fetch in self.sources:
+            try:
+                fetched = await source_fetch()
+                projects.extend(fetched)
+                logger.info(f"Fetched {len(fetched)} projects from {source_fetch.__name__}")
+            except Exception as e:
+                logger.error(f"Error fetching from {source_fetch.__name__}: {e}")
+        return projects
+
+    async def scan_once(self):
+        projects = await self.fetch_projects_from_all_sources()
+        for project in projects:
+            try:
+                verdict_data = await verify_project(project, self.config)
+                self.storage.save_scan_result(verdict_data)
+                if verdict_data['verdict'] == 'ACCEPT':
+                    await send_alert(verdict_data, channel_type='public')
+                elif verdict_data['verdict'] == 'REVIEW':
+                    await send_alert(verdict_data, channel_type='review')
+                logger.info(f"Processed project {project.get('name')} with verdict {verdict_data['verdict']}")
+            except Exception as e:
+                logger.error(f"Verification error for {project.get('name')}: {e}")
+
+# --- CLI Entrypoint ---
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="QuantumScannerUltime CLI")
+    parser.add_argument('--once', action='store_true', help='Run scan once and exit')
+    # TODO: Add daemon, dry-run, update-blacklists, rebuild-lockers flags
+    return parser.parse_args()
+
+async def main():
+    args = parse_args()
+    with open('config.yml', 'r') as f:
+        config = yaml.safe_load(f)
+
+    storage = Storage('quantumscanner.db')
+
+    if args.once:
+        scanner = QuantumScanner(config, storage)
+        await scanner.scan_once()
+
+if __name__ == "__main__":
+    asyncio.run(main())
