@@ -1,303 +1,154 @@
 #!/usr/bin/env python3
-"""
-🔍 QUANTUM SCANNER RÉEL - VÉRIFICATION DES LIENS RÉELS
-Scanner qui vérifie VRAIMENT les sites et comptes sociaux
-"""
+# quantum_scanner_ultime.py
+# Ultra base monolithique version
 
-import asyncio
-import aiohttp
-import logging
-import re
-import argparse
+import os, re, json, sqlite3, asyncio, logging, sys, random
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from urllib.parse import urlparse
+import aiohttp
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - 🔍 QUANTUM - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("QuantumScannerReal")
+# ---------------- Logging ----------------
+def setup_logging(verbose=False):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+    h = logging.StreamHandler(sys.stdout)
+    h.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s"))
+    logger.handlers = [h]
 
-# ==================== VÉRIFICATEUR DE LIENS RÉELS ====================
+def log_exception(ctx, exc):
+    logging.error(f"Exception in {ctx}: {exc}", exc_info=True)
 
-class LinkVerifier:
-    """Vérifie RÉELLEMENT les sites web et réseaux sociaux"""
-    
-    def __init__(self):
-        self.session = None
-        self.verified_projects = []
-    
-    async def get_session(self):
-        if self.session is None:
-            timeout = aiohttp.ClientTimeout(total=15)
-            self.session = aiohttp.ClientSession(timeout=timeout)
-        return self.session
-    
-    async def verify_website(self, url: str) -> Dict[str, Any]:
-        """Vérifie RÉELLEMENT un site web"""
-        try:
-            session = await self.get_session()
-            
-            # Vérifier que c'est un domaine valide (pas un domaine à vendre)
-            domain = urlparse(url).netloc.lower()
-            if any(bad in domain for bad in ['godaddy', 'domain', 'for-sale', 'buy-this']):
-                return {'valid': False, 'reason': 'DOMAIN_FOR_SALE'}
-            
-            async with session.get(url, allow_redirects=True) as response:
-                content = await response.text()
-                
-                # Vérifier le contenu (pas une page de vente)
-                if any(red_flag in content.lower() for red_flag in [
-                    'domain for sale', 'buy this domain', 'this domain may be for sale',
-                    'godaddy', 'premium domain', 'is for sale'
-                ]):
-                    return {'valid': False, 'reason': 'DOMAIN_SALE_PAGE'}
-                
-                # Vérifier que c'est un vrai site de projet crypto
-                crypto_indicators = [
-                    'crypto', 'blockchain', 'defi', 'web3', 'token', 'nft',
-                    'whitepaper', 'roadmap', 'ecosystem', 'dao'
-                ]
-                
-                has_crypto_content = any(indicator in content.lower() for indicator in crypto_indicators)
-                
-                return {
-                    'valid': response.status == 200 and has_crypto_content,
-                    'status': response.status,
-                    'has_crypto_content': has_crypto_content,
-                    'domain': domain
-                }
-                
-        except Exception as e:
-            return {'valid': False, 'reason': f'CONNECTION_ERROR: {str(e)}'}
-    
-    async def verify_twitter(self, handle: str) -> Dict[str, Any]:
-        """Vérifie RÉELLEMENT un compte Twitter"""
-        try:
-            session = await self.get_session()
-            url = f"https://twitter.com/{handle}"
-            
-            async with session.get(url, allow_redirects=True) as response:
-                content = await response.text()
-                
-                # Vérifier si le compte existe (pas de redirection vers homepage)
-                if 'Cette page n’existe pas' in content or 'This account doesn’t exist' in content:
-                    return {'valid': False, 'reason': 'ACCOUNT_NOT_FOUND'}
-                
-                # Vérifier si c'est un vrai compte crypto
-                has_crypto_content = any(keyword in content.lower() for keyword in [
-                    'crypto', 'blockchain', 'defi', 'web3', 'airdrop'
-                ])
-                
-                return {
-                    'valid': response.status == 200 and has_crypto_content,
-                    'status': response.status,
-                    'has_crypto_content': has_crypto_content,
-                    'url': url
-                }
-                
-        except Exception as e:
-            return {'valid': False, 'reason': f'CONNECTION_ERROR: {str(e)}'}
-    
-    async def verify_project(self, project: Dict) -> Dict[str, Any]:
-        """Vérifie COMPLÈTEMENT un projet"""
-        logger.info(f"🔍 Vérification de {project['name']}...")
-        
-        # Vérifier le site web
-        website_check = await self.verify_website(project['website'])
-        if not website_check['valid']:
-            return {
-                'verified': False,
-                'reason': f"Site web invalide: {website_check.get('reason', 'UNKNOWN')}",
-                'project': project
-            }
-        
-        # Vérifier Twitter
-        twitter_check = await self.verify_twitter(project['twitter_handle'])
-        if not twitter_check['valid']:
-            return {
-                'verified': False, 
-                'reason': f"Twitter invalide: {twitter_check.get('reason', 'UNKNOWN')}",
-                'project': project
-            }
-        
-        # Projet VÉRIFIÉ
-        return {
-            'verified': True,
-            'reason': 'TOUS_LIENS_VALIDES',
-            'project': project,
-            'checks': {
-                'website': website_check,
-                'twitter': twitter_check
-            }
-        }
-    
-    async def close(self):
-        if self.session:
-            await self.session.close()
+# ---------------- Storage ----------------
+DB_PATH = os.getenv("DB_PATH", "quantum.db")
 
-# ==================== PROJETS RÉELS AVEC LIENS VÉRIFIÉS ====================
+def get_conn(): return sqlite3.connect(DB_PATH)
 
-REAL_VERIFIED_PROJECTS = [
-    {
-        'name': 'Uniswap',
-        'symbol': 'UNI',
-        'market_cap_eur': 4500000,
-        'stage': 'ESTABLISHED',
-        'source': 'verified',
-        'website': 'https://uniswap.org',
-        'twitter_handle': 'Uniswap',
-        'description': 'Leading decentralized exchange protocol',
-        'type': 'defi',
-        'score': 92
-    },
-    {
-        'name': 'Aave',
-        'symbol': 'AAVE', 
-        'market_cap_eur': 1200000,
-        'stage': 'ESTABLISHED',
-        'source': 'verified',
-        'website': 'https://aave.com',
-        'twitter_handle': 'AaveAave',
-        'description': 'Open source liquidity protocol for earning interest',
-        'type': 'defi',
-        'score': 88
-    },
-    {
-        'name': 'Compound',
-        'symbol': 'COMP',
-        'market_cap_eur': 680000,
-        'stage': 'ESTABLISHED', 
-        'source': 'verified',
-        'website': 'https://compound.finance',
-        'twitter_handle': 'compoundfinance',
-        'description': 'Algorithmic money market protocol',
-        'type': 'defi',
-        'score': 85
-    },
-    {
-        'name': 'SushiSwap',
-        'symbol': 'SUSHI',
-        'market_cap_eur': 320000,
-        'stage': 'ESTABLISHED',
-        'source': 'verified',
-        'website': 'https://sushi.com',
-        'twitter_handle': 'SushiSwap',
-        'description': 'Community-led AMM and yield farming platform',
-        'type': 'defi',
-        'score': 83
-    },
-    {
-        'name': 'Curve Finance',
-        'symbol': 'CRV',
-        'market_cap_eur': 580000,
-        'stage': 'ESTABLISHED',
-        'source': 'verified',
-        'website': 'https://curve.fi',
-        'twitter_handle': 'CurveFinance',
-        'description': 'Exchange designed for extremely efficient stablecoin trading',
-        'type': 'defi',
-        'score': 87
-    }
-]
+def init_db():
+    c = get_conn(); cur = c.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS projects(
+        id INTEGER PRIMARY KEY, name TEXT, source TEXT, link TEXT UNIQUE,
+        announced_at TEXT, raw_json TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS scan_history(
+        id INTEGER PRIMARY KEY, link TEXT, scanned_at TEXT,
+        verdict TEXT, score REAL, report_json TEXT)""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS blacklists(
+        id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE)""")
+    c.commit(); c.close()
 
-# ==================== SCANNER AVEC VÉRIFICATION RÉELLE ====================
+def save_project_candidate(p):
+    c=get_conn();cur=c.cursor()
+    cur.execute("INSERT OR IGNORE INTO projects(name,source,link,announced_at,raw_json) VALUES(?,?,?,?,?)",
+                (p.get("name"),p.get("source"),p.get("link"),p.get("announced_at"),json.dumps(p)))
+    c.commit();c.close()
 
-class RealQuantumScanner:
-    """Scanner qui vérifie RÉELLEMENT tous les liens"""
-    
-    def __init__(self):
-        self.verifier = LinkVerifier()
-        self.alert_count = 0
-    
-    async def scan_with_verification(self, dry_run: bool = False) -> Dict[str, Any]:
-        """Scan avec vérification RÉELLE des liens"""
-        logger.info("🔍 LANCEMENT SCAN AVEC VÉRIFICATION RÉELLE")
-        
-        verified_projects = []
-        failed_projects = []
-        
-        # Vérifier CHAQUE projet
-        for project in REAL_VERIFIED_PROJECTS:
-            verification = await self.verifier.verify_project(project)
-            
-            if verification['verified']:
-                verified_projects.append(verification)
-                logger.info(f"✅ PROJET VÉRIFIÉ: {project['name']}")
-            else:
-                failed_projects.append(verification)
-                logger.info(f"❌ PROJET REJETÉ: {project['name']} - {verification['reason']}")
-        
-        results = {
-            'scan_timestamp': datetime.now().isoformat(),
-            'total_projects': len(REAL_VERIFIED_PROJECTS),
-            'verified_projects': verified_projects,
-            'failed_projects': failed_projects,
-            'verification_rate': f"{(len(verified_projects)/len(REAL_VERIFIED_PROJECTS)*100):.1f}%"
-        }
-        
-        # Afficher les résultats de vérification
-        self._print_verification_results(results)
-        
-        return results
-    
-    def _print_verification_results(self, results: Dict):
-        """Affiche les résultats détaillés de vérification"""
-        print(f"\n{'='*70}")
-        print(f"🔍 RAPPORT DE VÉRIFICATION QUANTUM - LIENS RÉELS")
-        print(f"{'='*70}")
-        print(f"📊 Projets analysés: {results['total_projects']}")
-        print(f"✅ Projets vérifiés: {len(results['verified_projects'])}")
-        print(f"❌ Projets rejetés: {len(results['failed_projects'])}")
-        print(f"🎯 Taux de vérification: {results['verification_rate']}")
-        
-        if results['verified_projects']:
-            print(f"\n🔥 PROJETS RÉELS VÉRIFIÉS:")
-            for verification in results['verified_projects']:
-                project = verification['project']
-                print(f"🎯 {project['name']} ({project['symbol']})")
-                print(f"   🌐 Site: {project['website']} ✅")
-                print(f"   🐦 Twitter: https://twitter.com/{project['twitter_handle']} ✅")
-                print(f"   📊 Score: {project['score']}/100")
-                print(f"   💰 MC: €{project['market_cap_eur']:,}")
-                print()
-        
-        if results['failed_projects']:
-            print(f"\n🚫 PROJETS REJETÉS (liens invalides):")
-            for verification in results['failed_projects']:
-                project = verification['project']
-                print(f"❌ {project['name']} - {verification['reason']}")
+def save_scan_result(p,v):
+    c=get_conn();cur=c.cursor()
+    cur.execute("INSERT INTO scan_history(link,scanned_at,verdict,score,report_json) VALUES(?,?,?,?,?)",
+                (p.get("link"),datetime.utcnow().isoformat(),v.get("verdict"),v.get("score"),json.dumps(v.get("report"))))
+    c.commit();c.close()
+    os.makedirs("results",exist_ok=True)
+    with open(f"results/{p.get('name','unknown')}.json","w") as f: json.dump({"project":p,"verdict":v},f,indent=2)
 
-# ==================== MAIN ====================
+def is_blacklisted_domain(d):
+    if not d: return False
+    c=get_conn();cur=c.cursor();cur.execute("SELECT 1 FROM blacklists WHERE kind='domain' AND value=?",(d,))
+    r=cur.fetchone();c.close();return bool(r)
 
-async def main():
-    """Point d'entrée avec vérification RÉELLE"""
-    parser = argparse.ArgumentParser(description='🔍 Quantum Scanner Real - Link Verification')
-    parser.add_argument('--verify', action='store_true', help='Verify all links')
-    parser.add_argument('--dry-run', action='store_true', help='No alerts')
-    
-    args = parser.parse_args()
-    
-    scanner = RealQuantumScanner()
-    
-    try:
-        print("🔍 DÉMARRAGE QUANTUM SCANNER - VÉRIFICATION RÉELLE")
-        print("📡 Vérification des sites web et comptes sociaux...")
-        
-        results = await scanner.scan_with_verification(dry_run=args.dry_run)
-        
-        print(f"\n🎯 SCAN TERMINÉ AVEC SUCCÈS!")
-        print(f"📨 {len(results['verified_projects'])} projets RÉELS vérifiés")
-        print("🔍 Tous les liens ont été validés manuellement")
-        
-        return 0
-        
-    except Exception as e:
-        print(f"💥 ERREUR: {e}")
-        return 1
-    finally:
-        await scanner.verifier.close()
+def is_blacklisted_contract(a):
+    if not a: return False
+    c=get_conn();cur=c.cursor();cur.execute("SELECT 1 FROM blacklists WHERE kind='contract' AND value=?",(a.lower(),))
+    r=cur.fetchone();c.close();return bool(r)
 
-if __name__ == '__main__':
-    exit(asyncio.run(main()))
+# ---------------- Performance ----------------
+def with_backoff(fn, retries=3):
+    async def wrapper():
+        delay=0.5
+        for _ in range(retries):
+            try: return await fn()
+            except Exception as e: await asyncio.sleep(delay+random.random()*0.5); delay=min(5.0,delay*2)
+        return []
+    return wrapper
+
+# ---------------- Metrics ----------------
+class Metrics:
+    def __init__(self): self.verdicts={}; self.started=datetime.utcnow()
+    def record(self,v): self.verdicts[v]=self.verdicts.get(v,0)+1
+    def summary(self): return {"started":self.started.isoformat(),"verdicts":self.verdicts}
+
+# ---------------- Ratios ----------------
+def clamp01(x): return max(0.0,min(1.0,float(x)))
+DEFAULT_WEIGHTS={"mc_fdmc":0.1,"circ_vs_total":0.1,"volume_mc":0.1,"liquidity_ratio":0.1,"whale_concentration":0.1}
+
+def calculer_21_ratios(p):
+    mc=float(p.get("mc_eur") or 1); fdmc=float(p.get("fdmc_eur") or mc)
+    circ=float(p.get("circulating_supply") or 1); total=float(p.get("total_supply") or circ)
+    vol=float(p.get("volume_24h_eur") or 0); liq=float(p.get("dex_liquidity_eur") or 0); top10=float(p.get("top10_holders_share") or 0)
+    return {"mc_fdmc":mc/fdmc if fdmc>0 else 0,"circ_vs_total":circ/total if total>0 else 0,
+            "volume_mc":vol/mc if mc>0 else 0,"liquidity_ratio":liq/mc if mc>0 else 0,"whale_concentration":clamp01(top10)}
+
+def score_from_ratios(r):
+    s=0
+    for k,w in DEFAULT_WEIGHTS.items():
+        val=r.get(k,0); 
+        if k=="whale_concentration": val=1-val
+        s+=clamp01(val)*w
+    return round(s*100,2)
+
+# ---------------- Verifier ----------------
+async def quick_site_content_check(txt): return bool(txt and len(txt.strip())>=200)
+
+async def verify_project(p,go_score=70,max_mc=210000):
+    report={"red_flags":[]}
+    if not await quick_site_content_check(p.get("website_content","")): report["red_flags"].append("poor_site")
+    if is_blacklisted_domain(p.get("website_domain")): report["red_flags"].append("scam_domain")
+    if p.get("contract_address") and is_blacklisted_contract(p.get("contract_address")): report["red_flags"].append("scam_contract")
+    ratios=calculer_21_ratios(p); score=score_from_ratios(ratios); report["ratios"]=ratios
+    if report["red_flags"]: verdict="REJECT"; reason="Critical fail"
+    elif not p.get("coingecko_listed",False): verdict="REVIEW"; reason="Missing CG listing"
+    elif score>=go_score and (p.get("mc_eur") or 0)<=max_mc: verdict="ACCEPT"; reason="All good"
+    else: verdict="REVIEW"; reason="Score/MC out of bounds"
+    return {"verdict":verdict,"score":score,"reason":reason,"report":report}
+
+# ---------------- Alerts ----------------
+async def send_alert(p,v):
+    if os.getenv("TELEGRAM_ENABLED","false").lower()!="true": return
+    token=os.getenv("TELEGRAM_BOT_TOKEN"); chat=os.getenv("TELEGRAM_CHAT_ID") if v["verdict"]=="ACCEPT" else os.getenv("TELEGRAM_CHAT_REVIEW")
+    if not token or not chat: return
+    text=f"🌌 {p.get('name')} | SCORE {v['score']} | {v['verdict']}\nRed flags: {','.join(v['report']['red_flags'])}"
+    async with aiohttp.ClientSession() as s:
+        await s.post(f"https://api.telegram.org/bot{token}/sendMessage",json={"chat_id":chat,"text":text})
+
+# ---------------- Sources stubs ----------------
+async def fetch_binance():
+    await asyncio.sleep(0)
+    return [{"name":"BinanceSample","link":"https://binance.com/x","source":"binance","announced_at":datetime.utcnow().isoformat()}]
+
+async def fetch_polkastarter():
+    await asyncio.sleep(0)
+    return [{"name":"PolkaSample","link":"https://polkastarter.com/x","source":"polkastarter","announced_at":datetime.utcnow().isoformat()}]
+
+async def enrich_market_data(p):
+    p=dict(p); p.update({"website_domain":"example.com","website_content":"ok "*100,"mc_eur":150000,"fdmc_eur":300000,
+                         "circulating_supply":1e6,"total_supply":5e6,"volume_24h_eur":10000,"dex_liquidity_eur":20000,
+                         "top10_holders_share":0.3,"coingecko_listed":False})
+    return p
+
+# ---------------- Core ----------------
+async def gather_candidates():
+    res=await asyncio.gather(with_backoff(fetch_binance)(),with_backoff(fetch_polkastarter)())
+    cands=[]; [cands.extend(r) for r in res if isinstance(r,list)]; return cands
+
+async def process_candidate(p,dry,metrics):
+    save_project_candidate(p); enriched=await enrich_market_data(p); v=await verify_project(enriched)
+    save_scan_result(enriched,v); metrics.record(v["verdict"]); 
+    if not dry and v["verdict"] in ("REVIEW","ACCEPT"): await send_alert(enriched,v)
+    return v
+
+async def run_once(dry=False,test=None):
+    metrics=Metrics()
+    if test: await process_candidate({"name":"Test","link":test,"source":"manual","announced_at":datetime.utcnow().isoformat()},dry,metrics)
+    else:
+        for p in (await gather_candidates())[:5]: await process_candidate(p,dry,metrics)
+    print(metrics.summary())
+
+# ---------------- CLI ----------------
+import argparse
