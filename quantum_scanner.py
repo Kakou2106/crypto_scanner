@@ -1,154 +1,416 @@
-#!/usr/bin/env python3
-# quantum_scanner_ultime.py
-# Ultra base monolithique version
+# QuantumScannerUltime 3.0 - Structure Projet Complète
+# =======================================================
 
-import os, re, json, sqlite3, asyncio, logging, sys, random
+"""
+ARBORESCENCE DU PROJET:
+
+QuantumScannerUltime/
+├── .github/
+│   └── workflows/
+│       └── quantum-scanner-24-7.yml
+├── src/
+│   ├── __init__.py
+│   ├── scanner_core.py
+│   ├── verifier.py
+│   ├── ratios.py
+│   ├── alerts.py
+│   ├── storage.py
+│   ├── ops.py
+│   ├── cli.py
+│   ├── error_handling.py
+│   ├── performance.py
+│   ├── metrics.py
+│   └── sources/
+│       ├── __init__.py
+│       ├── binance.py
+│       ├── coinlist.py
+│       ├── polkastarter.py
+│       └── base_source.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_verifier.py
+│   ├── test_ratios.py
+│   └── test_integration.py
+├── results/
+├── logs/
+├── .env.example
+├── config.yml
+├── requirements.txt
+└── README.md
+"""
+
+# ============================================================================
+# FICHIER: requirements.txt
+# ============================================================================
+REQUIREMENTS = """
+# Core
+python>=3.11
+aiohttp>=3.9.0
+asyncio>=3.4.3
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Web & Scraping
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+selenium>=4.15.0
+playwright>=1.40.0
+
+# Blockchain
+web3>=6.11.0
+eth-account>=0.10.0
+python-whois>=0.8.0
+
+# Data & Storage
+pandas>=2.1.0
+numpy>=1.26.0
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+
+# APIs & Notifications
+python-telegram-bot>=20.7
+tweepy>=4.14.0
+requests>=2.31.0
+slack-sdk>=3.26.0
+
+# Security & Analysis
+cryptography>=41.0.0
+python-snyk>=0.10.0
+nltk>=3.8.1
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+"""
+
+# ============================================================================
+# FICHIER: .env.example
+# ============================================================================
+ENV_EXAMPLE = """
+# ===== OBLIGATOIRES =====
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+TELEGRAM_CHAT_REVIEW=your_review_chat_id_here
+ETHERSCAN_API_KEY=your_etherscan_key
+BSCSCAN_API_KEY=your_bscscan_key
+POLYGONSCAN_API_KEY=your_polygon_key
+INFURA_URL=https://mainnet.infura.io/v3/your_project_id
+
+# ===== OPTIONNELS =====
+TWITTER_BEARER_TOKEN=
+GITHUB_TOKEN=
+SNYK_TOKEN=
+SLACK_WEBHOOK_URL=
+COINMARKETCAP_API_KEY=
+COINGECKO_API_KEY=
+VIRUSTOTAL_KEY=
+
+# S3 Storage (optionnel)
+S3_BUCKET=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_REGION=eu-west-1
+
+# Configuration
+MAX_MARKET_CAP_EUR=210000
+GO_SCORE=70
+SCAN_INTERVAL_HOURS=6
+"""
+
+# ============================================================================
+# FICHIER: config.yml
+# ============================================================================
+CONFIG_YAML = """
+scanner:
+  max_market_cap_eur: 210000
+  go_score: 70
+  scan_interval_hours: 6
+  max_concurrent_checks: 5
+  request_timeout: 30
+  
+sources:
+  enabled:
+    - binance
+    - coinlist
+    - polkastarter
+    - trustpad
+    - seedify
+  
+  priorities:
+    binance: 1
+    coinlist: 2
+    polkastarter: 3
+    
+ratios:
+  weights:
+    mc_fdmc: 0.08
+    circ_vs_total: 0.06
+    volume_mc: 0.07
+    liquidity_ratio: 0.10
+    whale_concentration: 0.08
+    audit_score: 0.09
+    vc_score: 0.06
+    social_sentiment: 0.05
+    dev_activity: 0.07
+    market_sentiment: 0.04
+    tokenomics_health: 0.08
+    vesting_score: 0.07
+    exchange_listing_score: 0.04
+    community_growth: 0.03
+    partnership_quality: 0.03
+    product_maturity: 0.02
+    revenue_generation: 0.02
+    volatility: 0.04
+    correlation: 0.02
+    historical_performance: 0.03
+    risk_adjusted_return: 0.02
+    
+thresholds:
+  min_liquidity_ratio: 0.1
+  max_whale_concentration: 0.4
+  min_lp_lock_days: 365
+  min_site_content_chars: 200
+  min_domain_age_days: 30
+  
+blacklists:
+  scam_databases:
+    - cryptoscamdb
+    - chainabuse
+    - metamask_phishing
+  
+  update_interval_hours: 24
+  
+lockers:
+  known_addresses:
+    unicrypt: "0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214"
+    team_finance: "0xC77aab3c6D7dAb46248F3CC3033C856171878BD5"
+    dxsale: "0x2D045410f002A95EFcEE67759A92518fA3FcE677"
+    uncx: "0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214"
+"""
+
+# ============================================================================
+# FICHIER: src/scanner_core.py
+# ============================================================================
+
+import asyncio
+import os
+import logging
 from datetime import datetime
+from typing import List, Dict, Optional
 import aiohttp
+from .verifier import verify_project
+from .alerts import send_telegram_alert
+from .storage import Database
+from .metrics import MetricsCollector
+from .error_handling import handle_scan_error
 
-# ---------------- Logging ----------------
-def setup_logging(verbose=False):
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
-    h = logging.StreamHandler(sys.stdout)
-    h.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s"))
-    logger.handlers = [h]
+logger = logging.getLogger("quantum_scanner")
 
-def log_exception(ctx, exc):
-    logging.error(f"Exception in {ctx}: {exc}", exc_info=True)
+class QuantumScanner:
+    """Scanner principal orchestrant la détection et validation des projets crypto"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.db = Database()
+        self.metrics = MetricsCollector()
+        self.is_github_actions = os.getenv("GITHUB_ACTIONS") == "true"
+        
+        if self.is_github_actions:
+            self._setup_github_logging()
+    
+    def _setup_github_logging(self):
+        """Configure logging optimisé pour GitHub Actions"""
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            '::group::%(levelname)s - %(name)s\n%(message)s\n::endgroup::'
+        ))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    
+    async def scan_once(self) -> Dict:
+        """Exécute un scan unique de tous les launchpads"""
+        logger.info("🌌 Démarrage du QuantumScanner ULTIME...")
+        start_time = datetime.now()
+        
+        try:
+            # Importer dynamiquement les sources activées
+            sources = await self._load_enabled_sources()
+            
+            # Collecter tous les projets candidats
+            all_projects = []
+            for source in sources:
+                try:
+                    projects = await source.fetch_list()
+                    all_projects.extend(projects)
+                    logger.info(f"✅ {source.name}: {len(projects)} projets trouvés")
+                except Exception as e:
+                    logger.error(f"❌ Erreur {source.name}: {e}")
+                    self.metrics.record_error(source.name, str(e))
+            
+            logger.info(f"📊 Total: {len(all_projects)} projets à analyser")
+            
+            # Filtrer les doublons et projets déjà scannés
+            unique_projects = await self._filter_duplicates(all_projects)
+            
+            # Vérifier chaque projet
+            results = {
+                "accept": [],
+                "review": [],
+                "reject": []
+            }
+            
+            for project in unique_projects:
+                try:
+                    verification = await verify_project(project, self.config)
+                    
+                    # Stocker en DB
+                    await self.db.save_project(project, verification)
+                    
+                    # Classer selon verdict
+                    verdict = verification["verdict"]
+                    results[verdict.lower()].append({
+                        "project": project,
+                        "verification": verification
+                    })
+                    
+                    # Envoyer alertes Telegram si ACCEPT ou REVIEW
+                    if verdict in ["ACCEPT", "REVIEW"]:
+                        await send_telegram_alert(project, verification, verdict)
+                    
+                    self.metrics.record_scan(project["name"], verdict)
+                    
+                except Exception as e:
+                    await handle_scan_error(e, project, self.metrics)
+            
+            # Résumé final
+            summary = {
+                "scan_date": datetime.now().isoformat(),
+                "duration_seconds": (datetime.now() - start_time).total_seconds(),
+                "total_scanned": len(unique_projects),
+                "accept": len(results["accept"]),
+                "review": len(results["review"]),
+                "reject": len(results["reject"]),
+                "details": results
+            }
+            
+            logger.info(f"""
+            ═══════════════════════════════════════
+            🎯 SCAN TERMINÉ
+            ⏱️  Durée: {summary['duration_seconds']:.2f}s
+            ✅ ACCEPT: {summary['accept']}
+            ⚠️  REVIEW: {summary['review']}
+            ❌ REJECT: {summary['reject']}
+            ═══════════════════════════════════════
+            """)
+            
+            # Sauvegarder résultats
+            await self._save_results(summary)
+            
+            return summary
+            
+        except Exception as e:
+            logger.critical(f"💥 Erreur critique dans scan_once: {e}")
+            raise
+    
+    async def run_daemon(self):
+        """Mode daemon: scans répétés à intervalle configuré"""
+        interval_hours = self.config.get("scan_interval_hours", 6)
+        logger.info(f"🔄 Mode daemon activé (scan toutes les {interval_hours}h)")
+        
+        while True:
+            try:
+                await self.scan_once()
+            except Exception as e:
+                logger.error(f"Erreur dans daemon: {e}")
+            
+            await asyncio.sleep(interval_hours * 3600)
+    
+    async def run_github_actions_scan(self):
+        """Scan optimisé pour GitHub Actions avec artefacts"""
+        logger.info("🚀 Mode GitHub Actions détecté")
+        
+        summary = await self.scan_once()
+        
+        # Sauvegarder artefacts pour GitHub
+        artifacts_dir = os.getenv("GITHUB_WORKSPACE", ".") + "/artifacts"
+        os.makedirs(artifacts_dir, exist_ok=True)
+        
+        import json
+        with open(f"{artifacts_dir}/scan_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+        
+        # Générer rapport markdown
+        report = self._generate_markdown_report(summary)
+        with open(f"{artifacts_dir}/scan_report.md", "w") as f:
+            f.write(report)
+        
+        logger.info(f"📦 Artefacts sauvegardés dans {artifacts_dir}")
+        
+        return summary
+    
+    async def _load_enabled_sources(self) -> List:
+        """Charge dynamiquement les sources activées depuis config"""
+        from .sources import binance, coinlist, polkastarter
+        
+        sources_map = {
+            "binance": binance.BinanceSource(),
+            "coinlist": coinlist.CoinListSource(),
+            "polkastarter": polkastarter.PolkastarterSource()
+        }
+        
+        enabled = self.config.get("sources", {}).get("enabled", [])
+        return [sources_map[name] for name in enabled if name in sources_map]
+    
+    async def _filter_duplicates(self, projects: List[Dict]) -> List[Dict]:
+        """Filtre doublons et projets déjà scannés récemment"""
+        seen = set()
+        unique = []
+        
+        for project in projects:
+            key = f"{project.get('name', '')}_{project.get('contract_address', '')}"
+            
+            if key not in seen:
+                # Vérifier si déjà scanné dans les dernières 24h
+                if not await self.db.was_recently_scanned(project, hours=24):
+                    seen.add(key)
+                    unique.append(project)
+        
+        return unique
+    
+    async def _save_results(self, summary: Dict):
+        """Sauvegarde résultats JSON et génère rapport"""
+        results_dir = "results"
+        os.makedirs(results_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{results_dir}/scan_{timestamp}.json"
+        
+        import json
+        with open(filename, "w") as f:
+            json.dump(summary, f, indent=2)
+        
+        logger.info(f"💾 Résultats sauvegardés: {filename}")
+    
+    def _generate_markdown_report(self, summary: Dict) -> str:
+        """Génère rapport Markdown pour GitHub Actions"""
+        report = f"""# 🌌 QuantumScanner Report
+        
+**Scan Date:** {summary['scan_date']}
+**Duration:** {summary['duration_seconds']:.2f}s
 
-# ---------------- Storage ----------------
-DB_PATH = os.getenv("DB_PATH", "quantum.db")
+## Summary
+- ✅ **ACCEPT:** {summary['accept']} projects
+- ⚠️ **REVIEW:** {summary['review']} projects  
+- ❌ **REJECT:** {summary['reject']} projects
 
-def get_conn(): return sqlite3.connect(DB_PATH)
-
-def init_db():
-    c = get_conn(); cur = c.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS projects(
-        id INTEGER PRIMARY KEY, name TEXT, source TEXT, link TEXT UNIQUE,
-        announced_at TEXT, raw_json TEXT)""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS scan_history(
-        id INTEGER PRIMARY KEY, link TEXT, scanned_at TEXT,
-        verdict TEXT, score REAL, report_json TEXT)""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS blacklists(
-        id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE)""")
-    c.commit(); c.close()
-
-def save_project_candidate(p):
-    c=get_conn();cur=c.cursor()
-    cur.execute("INSERT OR IGNORE INTO projects(name,source,link,announced_at,raw_json) VALUES(?,?,?,?,?)",
-                (p.get("name"),p.get("source"),p.get("link"),p.get("announced_at"),json.dumps(p)))
-    c.commit();c.close()
-
-def save_scan_result(p,v):
-    c=get_conn();cur=c.cursor()
-    cur.execute("INSERT INTO scan_history(link,scanned_at,verdict,score,report_json) VALUES(?,?,?,?,?)",
-                (p.get("link"),datetime.utcnow().isoformat(),v.get("verdict"),v.get("score"),json.dumps(v.get("report"))))
-    c.commit();c.close()
-    os.makedirs("results",exist_ok=True)
-    with open(f"results/{p.get('name','unknown')}.json","w") as f: json.dump({"project":p,"verdict":v},f,indent=2)
-
-def is_blacklisted_domain(d):
-    if not d: return False
-    c=get_conn();cur=c.cursor();cur.execute("SELECT 1 FROM blacklists WHERE kind='domain' AND value=?",(d,))
-    r=cur.fetchone();c.close();return bool(r)
-
-def is_blacklisted_contract(a):
-    if not a: return False
-    c=get_conn();cur=c.cursor();cur.execute("SELECT 1 FROM blacklists WHERE kind='contract' AND value=?",(a.lower(),))
-    r=cur.fetchone();c.close();return bool(r)
-
-# ---------------- Performance ----------------
-def with_backoff(fn, retries=3):
-    async def wrapper():
-        delay=0.5
-        for _ in range(retries):
-            try: return await fn()
-            except Exception as e: await asyncio.sleep(delay+random.random()*0.5); delay=min(5.0,delay*2)
-        return []
-    return wrapper
-
-# ---------------- Metrics ----------------
-class Metrics:
-    def __init__(self): self.verdicts={}; self.started=datetime.utcnow()
-    def record(self,v): self.verdicts[v]=self.verdicts.get(v,0)+1
-    def summary(self): return {"started":self.started.isoformat(),"verdicts":self.verdicts}
-
-# ---------------- Ratios ----------------
-def clamp01(x): return max(0.0,min(1.0,float(x)))
-DEFAULT_WEIGHTS={"mc_fdmc":0.1,"circ_vs_total":0.1,"volume_mc":0.1,"liquidity_ratio":0.1,"whale_concentration":0.1}
-
-def calculer_21_ratios(p):
-    mc=float(p.get("mc_eur") or 1); fdmc=float(p.get("fdmc_eur") or mc)
-    circ=float(p.get("circulating_supply") or 1); total=float(p.get("total_supply") or circ)
-    vol=float(p.get("volume_24h_eur") or 0); liq=float(p.get("dex_liquidity_eur") or 0); top10=float(p.get("top10_holders_share") or 0)
-    return {"mc_fdmc":mc/fdmc if fdmc>0 else 0,"circ_vs_total":circ/total if total>0 else 0,
-            "volume_mc":vol/mc if mc>0 else 0,"liquidity_ratio":liq/mc if mc>0 else 0,"whale_concentration":clamp01(top10)}
-
-def score_from_ratios(r):
-    s=0
-    for k,w in DEFAULT_WEIGHTS.items():
-        val=r.get(k,0); 
-        if k=="whale_concentration": val=1-val
-        s+=clamp01(val)*w
-    return round(s*100,2)
-
-# ---------------- Verifier ----------------
-async def quick_site_content_check(txt): return bool(txt and len(txt.strip())>=200)
-
-async def verify_project(p,go_score=70,max_mc=210000):
-    report={"red_flags":[]}
-    if not await quick_site_content_check(p.get("website_content","")): report["red_flags"].append("poor_site")
-    if is_blacklisted_domain(p.get("website_domain")): report["red_flags"].append("scam_domain")
-    if p.get("contract_address") and is_blacklisted_contract(p.get("contract_address")): report["red_flags"].append("scam_contract")
-    ratios=calculer_21_ratios(p); score=score_from_ratios(ratios); report["ratios"]=ratios
-    if report["red_flags"]: verdict="REJECT"; reason="Critical fail"
-    elif not p.get("coingecko_listed",False): verdict="REVIEW"; reason="Missing CG listing"
-    elif score>=go_score and (p.get("mc_eur") or 0)<=max_mc: verdict="ACCEPT"; reason="All good"
-    else: verdict="REVIEW"; reason="Score/MC out of bounds"
-    return {"verdict":verdict,"score":score,"reason":reason,"report":report}
-
-# ---------------- Alerts ----------------
-async def send_alert(p,v):
-    if os.getenv("TELEGRAM_ENABLED","false").lower()!="true": return
-    token=os.getenv("TELEGRAM_BOT_TOKEN"); chat=os.getenv("TELEGRAM_CHAT_ID") if v["verdict"]=="ACCEPT" else os.getenv("TELEGRAM_CHAT_REVIEW")
-    if not token or not chat: return
-    text=f"🌌 {p.get('name')} | SCORE {v['score']} | {v['verdict']}\nRed flags: {','.join(v['report']['red_flags'])}"
-    async with aiohttp.ClientSession() as s:
-        await s.post(f"https://api.telegram.org/bot{token}/sendMessage",json={"chat_id":chat,"text":text})
-
-# ---------------- Sources stubs ----------------
-async def fetch_binance():
-    await asyncio.sleep(0)
-    return [{"name":"BinanceSample","link":"https://binance.com/x","source":"binance","announced_at":datetime.utcnow().isoformat()}]
-
-async def fetch_polkastarter():
-    await asyncio.sleep(0)
-    return [{"name":"PolkaSample","link":"https://polkastarter.com/x","source":"polkastarter","announced_at":datetime.utcnow().isoformat()}]
-
-async def enrich_market_data(p):
-    p=dict(p); p.update({"website_domain":"example.com","website_content":"ok "*100,"mc_eur":150000,"fdmc_eur":300000,
-                         "circulating_supply":1e6,"total_supply":5e6,"volume_24h_eur":10000,"dex_liquidity_eur":20000,
-                         "top10_holders_share":0.3,"coingecko_listed":False})
-    return p
-
-# ---------------- Core ----------------
-async def gather_candidates():
-    res=await asyncio.gather(with_backoff(fetch_binance)(),with_backoff(fetch_polkastarter)())
-    cands=[]; [cands.extend(r) for r in res if isinstance(r,list)]; return cands
-
-async def process_candidate(p,dry,metrics):
-    save_project_candidate(p); enriched=await enrich_market_data(p); v=await verify_project(enriched)
-    save_scan_result(enriched,v); metrics.record(v["verdict"]); 
-    if not dry and v["verdict"] in ("REVIEW","ACCEPT"): await send_alert(enriched,v)
-    return v
-
-async def run_once(dry=False,test=None):
-    metrics=Metrics()
-    if test: await process_candidate({"name":"Test","link":test,"source":"manual","announced_at":datetime.utcnow().isoformat()},dry,metrics)
-    else:
-        for p in (await gather_candidates())[:5]: await process_candidate(p,dry,metrics)
-    print(metrics.summary())
-
-# ---------------- CLI ----------------
-import argparse
+## Top ACCEPT Projects
+"""
+        for item in summary["details"]["accept"][:5]:
+            p = item["project"]
+            v = item["verification"]
+            report += f"\n### {p.get('name', 'N/A')}\n"
+            report += f"- Score: {v['score']:.1f}/100\n"
+            report += f"- Source: {p.get('source', 'N/A')}\n"
+        
+        return report
