@@ -2,56 +2,48 @@ name: Quantum Scanner 24/7
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Toutes les 6 heures
-  workflow_dispatch:  # Déclenchement manuel
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
 
 env:
   PYTHON_VERSION: '3.11'
-  SCAN_MODE: 'production'
 
 jobs:
-  quantum-scan:
+  scan:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install aiohttp python-dotenv
-    
-    - name: Create environment file
-      run: |
-        cat > .env << EOF
-        TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_CHAT_REVIEW=${{ secrets.TELEGRAM_CHAT_REVIEW }}
-        GO_SCORE=70
-        REVIEW_SCORE=40
-        MAX_MARKET_CAP_EUR=210000
-        HTTP_TIMEOUT=30
-        SCAN_INTERVAL_HOURS=6
-        EOF
-    
-    - name: Run Quantum Scanner
-      run: python main.py --once
-      continue-on-error: true
-    
-    - name: Upload scan results
-      uses: actions/upload-artifact@v4
-      with:
-        name: quantum-scan-results
-        path: |
-          quantum.db
-          quantum_scanner.log
-        retention-days: 7
-        if-no-files-found: ignore
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_REVIEW: ${{ secrets.TELEGRAM_CHAT_REVIEW }}
+          GO_SCORE: 70
+          REVIEW_SCORE: 40
+          MAX_MARKET_CAP_EUR: 210000
+        run: python main.py --once
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-results-${{ github.run_number }}
+          path: |
+            results/*.json
+            logs/*.log
+          retention-days: 30
