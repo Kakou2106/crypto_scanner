@@ -3,9 +3,7 @@ aiohttp==3.9.1
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
-playwright==1.40.0
-web3==6.11.3
 python-telegram-bot==20.7
 python-whois==0.8.0
 loguru==0.7.2
-pytest==7.4.3
+web3==6.11.3
