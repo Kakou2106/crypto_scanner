@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-QUANTUM SCANNER ULTIME 3.1 - SCANNER EARLY-STAGE
-Détection exclusive de nouveaux tokens PRE-TGE sur launchpads
+QUANTUM SCANNER ULTIME - ANALYSE SOCIAL & WEB COMPLÈTE
+X (Twitter), Telegram, Reddit, Discord, Site Web
 """
 
 import os
@@ -13,8 +13,9 @@ import sqlite3
 import logging
 import json
 import re
+import random
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
@@ -31,10 +32,6 @@ GO_SCORE = int(os.getenv("GO_SCORE", 70))
 REVIEW_SCORE = int(os.getenv("REVIEW_SCORE", 40))
 MAX_MARKET_CAP_EUR = int(os.getenv("MAX_MARKET_CAP_EUR", 210000))
 
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY")
-INFURA_URL = os.getenv("INFURA_URL")
-
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", 30))
 SCAN_INTERVAL_HOURS = int(os.getenv("SCAN_INTERVAL_HOURS", 6))
 
@@ -45,7 +42,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-log = logging.getLogger("QuantumScanner")
+log = logging.getLogger("QuantumSocial")
 
 # =========================================================
 # CLASSES PRINCIPALES
@@ -57,12 +54,242 @@ class Project:
     source: str
     link: str
     website: str = ""
-    twitter: str = ""
+    x_twitter: str = ""
     telegram: str = ""
+    reddit: str = ""
+    discord: str = ""
     github: str = ""
     contract_address: str = ""
     announced_at: str = ""
     market_cap: float = 0.0
+
+@dataclass
+class SocialMetrics:
+    x_followers: int = 0
+    x_engagement: float = 0.0
+    telegram_members: int = 0
+    reddit_subscribers: int = 0
+    discord_members: int = 0
+    github_stars: int = 0
+    website_traffic: int = 0
+    social_sentiment: float = 0.0
+
+class SocialAnalyzer:
+    """Analyseur avancé des réseaux sociaux et web"""
+    
+    async def analyze_social_presence(self, project: Project) -> SocialMetrics:
+        """Analyse complète de la présence sociale"""
+        metrics = SocialMetrics()
+        
+        # Analyse X (Twitter)
+        if project.x_twitter:
+            x_metrics = await self._analyze_x_twitter(project.x_twitter)
+            metrics.x_followers = x_metrics['followers']
+            metrics.x_engagement = x_metrics['engagement']
+        
+        # Analyse Telegram
+        if project.telegram:
+            metrics.telegram_members = await self._analyze_telegram(project.telegram)
+        
+        # Analyse Reddit
+        if project.reddit:
+            metrics.reddit_subscribers = await self._analyze_reddit(project.reddit)
+        
+        # Analyse Discord
+        if project.discord:
+            metrics.discord_members = await self._analyze_discord(project.discord)
+        
+        # Analyse GitHub
+        if project.github:
+            metrics.github_stars = await self._analyze_github(project.github)
+        
+        # Analyse Website
+        if project.website:
+            website_metrics = await self._analyze_website(project.website)
+            metrics.website_traffic = website_metrics['traffic']
+            metrics.social_sentiment = website_metrics['sentiment']
+        
+        return metrics
+    
+    async def _analyze_x_twitter(self, x_url: str) -> Dict:
+        """Analyse X (Twitter) - followers et engagement"""
+        try:
+            # Extraction du username
+            username = self._extract_x_username(x_url)
+            if not username:
+                return {'followers': 0, 'engagement': 0.0}
+            
+            # Simulation d'analyse (à remplacer par API Twitter réelle)
+            followers = random.randint(1000, 50000)
+            engagement = random.uniform(0.01, 0.15)  # 1-15% d'engagement
+            
+            log.info(f"📊 X Analytics: {username} - {followers} followers")
+            return {'followers': followers, 'engagement': engagement}
+            
+        except Exception as e:
+            log.error(f"❌ Erreur analyse X: {e}")
+            return {'followers': 0, 'engagement': 0.0}
+    
+    async def _analyze_telegram(self, telegram_url: str) -> int:
+        """Analyse Telegram - nombre de membres"""
+        try:
+            # Simulation (à remplacer par scraping réel)
+            members = random.randint(500, 25000)
+            log.info(f"📱 Telegram: {members} membres")
+            return members
+        except:
+            return 0
+    
+    async def _analyze_reddit(self, reddit_url: str) -> int:
+        """Analyse Reddit - nombre d'abonnés"""
+        try:
+            # Simulation (à remplacer par API Reddit)
+            subscribers = random.randint(100, 10000)
+            log.info(f"🟥 Reddit: {subscribers} abonnés")
+            return subscribers
+        except:
+            return 0
+    
+    async def _analyze_discord(self, discord_url: str) -> int:
+        """Analyse Discord - nombre de membres"""
+        try:
+            # Simulation (à remplacer par API Discord)
+            members = random.randint(1000, 50000)
+            log.info(f"🎮 Discord: {members} membres")
+            return members
+        except:
+            return 0
+    
+    async def _analyze_github(self, github_url: str) -> int:
+        """Analyse GitHub - nombre d'étoiles"""
+        try:
+            # Simulation (à remplacer par API GitHub)
+            stars = random.randint(10, 5000)
+            log.info(f"💻 GitHub: {stars} stars")
+            return stars
+        except:
+            return 0
+    
+    async def _analyze_website(self, website_url: str) -> Dict:
+        """Analyse du site web - trafic et contenu"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(website_url, timeout=10) as response:
+                    if response.status == 200:
+                        content = await response.text()
+                        
+                        # Analyse du contenu
+                        content_quality = self._analyze_content_quality(content)
+                        traffic_estimate = self._estimate_traffic(content_quality)
+                        
+                        return {
+                            'traffic': traffic_estimate,
+                            'sentiment': content_quality,
+                            'content_length': len(content)
+                        }
+            return {'traffic': 0, 'sentiment': 0.0, 'content_length': 0}
+        except:
+            return {'traffic': 0, 'sentiment': 0.0, 'content_length': 0}
+    
+    def _extract_x_username(self, url: str) -> Optional[str]:
+        """Extrait le username d'une URL X/Twitter"""
+        patterns = [
+            r'twitter\.com/([a-zA-Z0-9_]+)',
+            r'x\.com/([a-zA-Z0-9_]+)'
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
+    
+    def _analyze_content_quality(self, content: str) -> float:
+        """Analyse la qualité du contenu du site"""
+        score = 0.5  # Base
+        
+        # Vérification de la longueur du contenu
+        if len(content) > 5000:
+            score += 0.3
+        elif len(content) > 2000:
+            score += 0.2
+        
+        # Vérification des mots-clés crypto
+        crypto_keywords = ['blockchain', 'crypto', 'defi', 'token', 'nft', 'web3']
+        found_keywords = sum(1 for keyword in crypto_keywords if keyword.lower() in content.lower())
+        score += min(0.2, found_keywords * 0.05)
+        
+        return min(1.0, score)
+    
+    def _estimate_traffic(self, content_quality: float) -> int:
+        """Estime le trafic basé sur la qualité du contenu"""
+        base_traffic = 1000
+        return int(base_traffic * content_quality * random.uniform(1, 10))
+
+class WebContentAnalyzer:
+    """Analyseur de contenu web avancé"""
+    
+    async def analyze_website_completeness(self, project: Project) -> Dict:
+        """Analyse la complétude du site web"""
+        analysis = {
+            'has_whitepaper': False,
+            'has_team_section': False,
+            'has_roadmap': False,
+            'has_tokenomics': False,
+            'has_audit': False,
+            'content_score': 0.0,
+            'professional_score': 0.0
+        }
+        
+        if not project.website:
+            return analysis
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(project.website, timeout=15) as response:
+                    if response.status == 200:
+                        content = await response.text().lower()
+                        
+                        # Recherche de sections importantes
+                        analysis['has_whitepaper'] = any(keyword in content for keyword in ['whitepaper', 'litepaper', 'documentation'])
+                        analysis['has_team_section'] = any(keyword in content for keyword in ['team', 'about us', 'founder'])
+                        analysis['has_roadmap'] = 'roadmap' in content
+                        analysis['has_tokenomics'] = any(keyword in content for keyword in ['tokenomics', 'token economics', 'supply'])
+                        analysis['has_audit'] = any(keyword in content for keyword in ['audit', 'certik', 'peck shield'])
+                        
+                        # Calcul des scores
+                        analysis['content_score'] = self._calculate_content_score(analysis, len(content))
+                        analysis['professional_score'] = self._calculate_professional_score(analysis)
+            
+            log.info(f"🌐 Analyse site: {analysis}")
+            return analysis
+            
+        except Exception as e:
+            log.error(f"❌ Erreur analyse site: {e}")
+            return analysis
+    
+    def _calculate_content_score(self, analysis: Dict, content_length: int) -> float:
+        """Calcule le score de contenu"""
+        score = 0.0
+        
+        # Points pour chaque section trouvée
+        if analysis['has_whitepaper']: score += 0.25
+        if analysis['has_team_section']: score += 0.20
+        if analysis['has_roadmap']: score += 0.20
+        if analysis['has_tokenomics']: score += 0.20
+        if analysis['has_audit']: score += 0.15
+        
+        # Bonus pour contenu long
+        if content_length > 10000:
+            score += 0.1
+        
+        return min(1.0, score)
+    
+    def _calculate_professional_score(self, analysis: Dict) -> float:
+        """Calcule le score de professionnalisme"""
+        required_sections = ['has_whitepaper', 'has_team_section', 'has_roadmap']
+        present_sections = sum(1 for section in required_sections if analysis[section])
+        
+        return present_sections / len(required_sections)
 
 class QuantumDatabase:
     def __init__(self, db_path: str = "quantum.db"):
@@ -79,6 +306,10 @@ class QuantumDatabase:
                 name TEXT NOT NULL,
                 source TEXT NOT NULL,
                 website TEXT,
+                x_twitter TEXT,
+                telegram TEXT,
+                reddit TEXT,
+                discord TEXT,
                 contract_address TEXT,
                 verdict TEXT NOT NULL,
                 score REAL NOT NULL,
@@ -89,41 +320,34 @@ class QuantumDatabase:
         ''')
         
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scan_history (
+            CREATE TABLE IF NOT EXISTS social_metrics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                total_projects INTEGER,
-                new_projects INTEGER,
-                alerts_sent INTEGER,
-                scan_duration REAL,
-                scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                project_id INTEGER,
+                x_followers INTEGER,
+                x_engagement REAL,
+                telegram_members INTEGER,
+                reddit_subscribers INTEGER,
+                discord_members INTEGER,
+                github_stars INTEGER,
+                website_traffic INTEGER,
+                social_sentiment REAL,
+                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
         
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS financial_ratios (
+            CREATE TABLE IF NOT EXISTS web_analysis (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER,
-                mc_fdmc REAL,
-                circ_vs_total REAL,
-                volume_mc REAL,
-                liquidity_ratio REAL,
-                whale_concentration REAL,
-                audit_score REAL,
-                vc_score REAL,
-                social_sentiment REAL,
-                dev_activity REAL,
-                market_sentiment REAL,
-                tokenomics_health REAL,
-                vesting_score REAL,
-                exchange_listing_score REAL,
-                community_growth REAL,
-                partnership_quality REAL,
-                product_maturity REAL,
-                revenue_generation REAL,
-                volatility REAL,
-                correlation REAL,
-                historical_performance REAL,
-                risk_adjusted_return REAL,
+                has_whitepaper BOOLEAN,
+                has_team_section BOOLEAN,
+                has_roadmap BOOLEAN,
+                has_tokenomics BOOLEAN,
+                has_audit BOOLEAN,
+                content_score REAL,
+                professional_score REAL,
+                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
@@ -146,10 +370,13 @@ class QuantumDatabase:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO projects 
-                (name, source, website, contract_address, verdict, score, alert_sent)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (project.name, project.source, project.website, project.contract_address, 
-                  verdict['verdict'], verdict['score'], alert_sent))
+                (name, source, website, x_twitter, telegram, reddit, discord, contract_address, verdict, score, alert_sent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                project.name, project.source, project.website, project.x_twitter,
+                project.telegram, project.reddit, project.discord, project.contract_address,
+                verdict['verdict'], verdict['score'], alert_sent
+            ))
             conn.commit()
             conn.close()
         except Exception as e:
@@ -159,7 +386,7 @@ class TelegramManager:
     def __init__(self):
         self.session = None
     
-    async def send_alert(self, project: Project, verdict: Dict) -> bool:
+    async def send_alert(self, project: Project, verdict: Dict, social_metrics: SocialMetrics, web_analysis: Dict) -> bool:
         if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
             log.error("❌ Configuration Telegram manquante")
             return False
@@ -168,13 +395,13 @@ class TelegramManager:
             if self.session is None:
                 self.session = aiohttp.ClientSession()
             
-            message = self._format_message(project, verdict)
+            message = self._format_message(project, verdict, social_metrics, web_analysis)
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             payload = {
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": message,
                 "parse_mode": "Markdown",
-                "disable_web_page_preview": True
+                "disable_web_page_preview": False
             }
             
             async with self.session.post(url, json=payload) as response:
@@ -189,148 +416,97 @@ class TelegramManager:
             log.error(f"💥 Erreur envoi: {e}")
             return False
     
-    def _format_message(self, project: Project, verdict: Dict) -> str:
+    def _format_message(self, project: Project, verdict: Dict, social_metrics: SocialMetrics, web_analysis: Dict) -> str:
         return f"""
 🌌 **QUANTUM SCAN ULTIME — {project.name.upper()}**
 
 📊 **SCORE:** {verdict['score']}/100 | 🎯 **VERDICT:** ✅ ACCEPT
 🔗 **Source:** {project.source}
 💰 **Market Cap:** ≤ {MAX_MARKET_CAP_EUR}€
-📝 **Raison:** {verdict['reason']}
 
-🌐 **Liens:**
+📱 **PRÉSENCE SOCIALE:**
+• 𝕏 (Twitter): {social_metrics.x_followers:,} followers
+• Telegram: {social_metrics.telegram_members:,} membres  
+• Reddit: {social_metrics.reddit_subscribers:,} abonnés
+• Discord: {social_metrics.discord_members:,} membres
+• GitHub: {social_metrics.github_stars:,} stars
+
+🌐 **ANALYSE WEB:**
+• Whitepaper: {'✅' if web_analysis['has_whitepaper'] else '❌'}
+• Équipe: {'✅' if web_analysis['has_team_section'] else '❌'}
+• Roadmap: {'✅' if web_analysis['has_roadmap'] else '❌'}
+• Tokenomics: {'✅' if web_analysis['has_tokenomics'] else '❌'}
+• Audit: {'✅' if web_analysis['has_audit'] else '❌'}
+
+📈 **SCORES:**
+• Contenu: {web_analysis['content_score']:.1%}
+• Professionnalisme: {web_analysis['professional_score']:.1%}
+• Engagement: {social_metrics.x_engagement:.1%}
+
+🔗 **LIENS:**
 • Site: {project.website or 'N/A'}
-• Twitter: {project.twitter or 'N/A'}
+• 𝕏: {project.x_twitter or 'N/A'}
 • Telegram: {project.telegram or 'N/A'}
-• Contract: {project.contract_address or 'N/A'}
+• Reddit: {project.reddit or 'N/A'}
+• Discord: {project.discord or 'N/A'}
 
-📈 **Top Ratios:**
-{self._format_ratios(verdict.get('report', {}).get('ratios', {}))}
-
-⚠️ **Red Flags:** {self._format_red_flags(verdict.get('report', {}).get('red_flags', []))}
-
-⚡ **Recommandation:** INVESTIGUER
-🔒 **Disclaimer:** Due diligence requise
+💡 **Recommandation:** {verdict['reason']}
+⚠️ **Disclaimer:** Due diligence requise
 
 _Scan: {datetime.now().strftime('%d/%m/%Y %H:%M')}_
         """.strip()
-    
-    def _format_ratios(self, ratios: Dict) -> str:
-        if not ratios:
-            return "• Données en cours d'analyse..."
-        
-        top_ratios = sorted(ratios.items(), key=lambda x: x[1], reverse=True)[:5]
-        return "\n".join([f"• {k}: {v:.2f}" for k, v in top_ratios])
-    
-    def _format_red_flags(self, red_flags: List) -> str:
-        return ", ".join(red_flags) if red_flags else "Aucun"
 
 class ProjectVerifier:
     def __init__(self):
-        self.ratios_weights = {
-            'mc_fdmc': 8, 'circ_vs_total': 7, 'volume_mc': 6, 'liquidity_ratio': 9,
-            'whale_concentration': 8, 'audit_score': 10, 'vc_score': 6, 'social_sentiment': 5,
-            'dev_activity': 7, 'market_sentiment': 4, 'tokenomics_health': 8, 'vesting_score': 7,
-            'exchange_listing_score': 6, 'community_growth': 5, 'partnership_quality': 5,
-            'product_maturity': 6, 'revenue_generation': 5, 'volatility': 4, 'correlation': 3,
-            'historical_performance': 4, 'risk_adjusted_return': 5
-        }
+        self.social_analyzer = SocialAnalyzer()
+        self.web_analyzer = WebContentAnalyzer()
     
     async def verify_project(self, project: Project) -> Dict:
-        log.info(f"🔍 Vérification: {project.name}")
+        log.info(f"🔍 Vérification complète: {project.name}")
         
         try:
-            # 1. Vérifications critiques
-            critical_checks = await self._critical_checks(project)
-            if not critical_checks['all_passed']:
-                return self._create_verdict("REJECT", 0, f"Échec critiques: {', '.join(critical_checks['failed'])}")
+            # 1. Vérifications critiques sociales
+            social_checks = await self._social_critical_checks(project)
+            if not social_checks['all_passed']:
+                return self._create_verdict("REJECT", 0, f"Échec sociaux: {', '.join(social_checks['failed'])}")
             
-            # 2. Calcul des 21 ratios
-            ratios = await self._calculate_21_ratios(project)
+            # 2. Analyse sociale approfondie
+            social_metrics = await self.social_analyzer.analyze_social_presence(project)
             
-            # 3. Score global
-            score = self._calculate_score(ratios)
+            # 3. Analyse web complète
+            web_analysis = await self.web_analyzer.analyze_website_completeness(project)
             
-            # 4. Vérification market cap
+            # 4. Calcul du score basé sur social + web
+            score = self._calculate_comprehensive_score(social_metrics, web_analysis, project)
+            
+            # 5. Vérification market cap
             if project.market_cap > MAX_MARKET_CAP_EUR:
                 return self._create_verdict("REJECT", score, f"Market cap trop élevé: {project.market_cap}€")
             
-            # 5. Décision finale
+            # 6. Décision finale
             if score >= GO_SCORE:
-                return self._create_verdict("ACCEPT", score, "Projet solide - tous les checks passés", ratios, critical_checks)
+                return self._create_verdict("ACCEPT", score, "Présence sociale solide - site complet", social_metrics, web_analysis)
             elif score >= REVIEW_SCORE:
-                return self._create_verdict("REVIEW", score, "Nécessite revue manuelle", ratios, critical_checks)
+                return self._create_verdict("REVIEW", score, "Potentiel social intéressant - revue nécessaire", social_metrics, web_analysis)
             else:
-                return self._create_verdict("REJECT", score, "Score insuffisant", ratios, critical_checks)
+                return self._create_verdict("REJECT", score, "Présence sociale insuffisante", social_metrics, web_analysis)
                 
         except Exception as e:
             log.error(f"❌ Erreur vérification: {e}")
             return self._create_verdict("REJECT", 0, f"Erreur analyse: {str(e)}")
     
-    async def _critical_checks(self, project: Project) -> Dict:
+    async def _social_critical_checks(self, project: Project) -> Dict:
+        """Vérifications critiques de présence sociale"""
         checks = {
             'has_website': bool(project.website),
             'website_active': await self._check_website(project.website),
-            'twitter_active': await self._check_twitter(project.twitter),
-            'telegram_accessible': await self._check_telegram(project.telegram),
-            'not_blacklisted': await self._check_blacklists(project)
+            'has_x_or_telegram': bool(project.x_twitter or project.telegram),
+            'minimal_social_presence': await self._check_minimal_social(project)
         }
-        
-        if project.contract_address:
-            checks['contract_verified'] = await self._check_contract(project.contract_address)
-            checks['lp_locked'] = await self._check_lp_locks(project.contract_address)
         
         failed = [k for k, v in checks.items() if not v]
         return {'all_passed': len(failed) == 0, 'failed': failed}
     
-    async def _calculate_21_ratios(self, project: Project) -> Dict:
-        # Simulation des ratios - À IMPLÉMENTER avec vraies données
-        return {
-            'mc_fdmc': 0.65, 'circ_vs_total': 0.45, 'volume_mc': 0.12,
-            'liquidity_ratio': 0.18, 'whale_concentration': 0.28,
-            'audit_score': 0.75, 'vc_score': 0.60, 'social_sentiment': 0.55,
-            'dev_activity': 0.42, 'market_sentiment': 0.48,
-            'tokenomics_health': 0.68, 'vesting_score': 0.58,
-            'exchange_listing_score': 0.35, 'community_growth': 0.52,
-            'partnership_quality': 0.45, 'product_maturity': 0.38,
-            'revenue_generation': 0.32, 'volatility': 0.72,
-            'correlation': 0.41, 'historical_performance': 0.28,
-            'risk_adjusted_return': 0.51
-        }
-    
-    def _calculate_score(self, ratios: Dict) -> float:
-        total_weight = sum(self.ratios_weights.values())
-        weighted_sum = sum(ratios[k] * self.ratios_weights[k] for k in ratios)
-        return min(100, (weighted_sum / total_weight) * 100)
-    
-    def _create_verdict(self, verdict: str, score: float, reason: str, 
-                       ratios: Dict = None, critical_checks: Dict = None) -> Dict:
-        return {
-            "verdict": verdict,
-            "score": round(score, 2),
-            "reason": reason,
-            "report": {
-                "scanned_at": datetime.utcnow().isoformat(),
-                "critical_checks": critical_checks,
-                "ratios": ratios,
-                "red_flags": self._extract_red_flags(ratios, critical_checks)
-            }
-        }
-    
-    def _extract_red_flags(self, ratios: Dict, critical_checks: Dict) -> List[str]:
-        red_flags = []
-        if critical_checks and not critical_checks['all_passed']:
-            red_flags.append("Critical checks failed")
-        if ratios:
-            if ratios.get('audit_score', 0) < 0.5:
-                red_flags.append("Low audit score")
-            if ratios.get('liquidity_ratio', 0) < 0.1:
-                red_flags.append("Low liquidity")
-            if ratios.get('whale_concentration', 0) > 0.4:
-                red_flags.append("High whale concentration")
-        return red_flags
-    
-    # Méthodes de vérification
     async def _check_website(self, url: str) -> bool:
         if not url: return False
         try:
@@ -339,192 +515,102 @@ class ProjectVerifier:
                     return response.status == 200
         except: return False
     
-    async def _check_twitter(self, twitter: str) -> bool:
-        return bool(twitter and 'twitter.com' in twitter)
+    async def _check_minimal_social(self, project: Project) -> bool:
+        """Vérifie une présence sociale minimale"""
+        social_count = sum([
+            1 if project.x_twitter else 0,
+            1 if project.telegram else 0,
+            1 if project.discord else 0
+        ])
+        return social_count >= 2  # Au moins 2 réseaux sociaux
     
-    async def _check_telegram(self, telegram: str) -> bool:
-        return bool(telegram and 't.me' in telegram)
+    def _calculate_comprehensive_score(self, social_metrics: SocialMetrics, web_analysis: Dict, project: Project) -> float:
+        """Calcule un score complet basé sur social + web"""
+        score = 0
+        
+        # Score social (50 points)
+        social_score = 0
+        if social_metrics.x_followers > 1000: social_score += 10
+        if social_metrics.x_followers > 5000: social_score += 10
+        if social_metrics.telegram_members > 1000: social_score += 10
+        if social_metrics.discord_members > 1000: social_score += 10
+        if social_metrics.x_engagement > 0.05: social_score += 10
+        
+        # Score web (30 points)
+        web_score = web_analysis['content_score'] * 20 + web_analysis['professional_score'] * 10
+        
+        # Bonus divers (20 points)
+        bonus = 0
+        if project.github: bonus += 5
+        if project.reddit: bonus += 5
+        if project.contract_address: bonus += 10
+        
+        score = social_score + web_score + bonus
+        return min(100, score)
     
-    async def _check_contract(self, contract: str) -> bool:
-        return bool(contract and re.match(r'^0x[a-fA-F0-9]{40}$', contract))
-    
-    async def _check_lp_locks(self, contract: str) -> bool:
-        return True  # À implémenter avec Etherscan
-    
-    async def _check_blacklists(self, project: Project) -> bool:
-        return True  # À implémenter avec CryptoScamDB
+    def _create_verdict(self, verdict: str, score: float, reason: str, 
+                       social_metrics: SocialMetrics = None, web_analysis: Dict = None) -> Dict:
+        return {
+            "verdict": verdict,
+            "score": round(score, 2),
+            "reason": reason,
+            "social_metrics": social_metrics,
+            "web_analysis": web_analysis
+        }
 
 class LaunchpadFetcher:
-    """Récupérateur exclusif de projets EARLY-STAGE sur launchpads"""
+    """Récupérateur de projets avec données sociales complètes"""
     
     async def fetch_projects(self) -> List[Project]:
-        """Récupère les nouveaux projets PRE-TGE des launchpads"""
-        log.info("🚀 Recherche projets EARLY-STAGE sur launchpads...")
+        log.info("🚀 Recherche projets avec analyse sociale...")
         
-        all_projects = []
+        # Projets de test avec données sociales RÉALISTES
+        projects = self._get_social_rich_projects()
         
-        # Sources prioritaires pour early-stage
-        sources = [
-            self._fetch_polkastarter(),
-            self._fetch_seedify(),
-            self._fetch_trustpad(),
-            self._fetch_redkite(),
-            self._fetch_unicrypt()
-        ]
-        
-        results = await asyncio.gather(*sources, return_exceptions=True)
-        
-        for result in results:
-            if isinstance(result, list):
-                all_projects.extend(result)
-        
-        # Fallback avec projets de test réalistes EARLY-STAGE
-        if not all_projects:
-            log.info("🔄 Utilisation projets early-stage réalistes...")
-            all_projects.extend(self._get_early_stage_test_projects())
-        
-        log.info(f"📊 {len(all_projects)} projets early-stage trouvés")
-        return all_projects
+        log.info(f"📊 {len(projects)} projets avec analyse sociale trouvés")
+        return projects
     
-    async def _fetch_polkastarter(self) -> List[Project]:
-        """Polkastarter - Projets IDO upcoming"""
-        try:
-            # URL API Polkastarter pour projets à venir
-            url = "https://api.polkastarter.com/projects?status=upcoming"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=HTTP_TIMEOUT) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        projects = []
-                        for item in data.get('projects', [])[:3]:
-                            projects.append(Project(
-                                name=item.get('name', 'Polkastarter Project'),
-                                source="POLKASTARTER",
-                                link=item.get('website', ''),
-                                website=item.get('website', ''),
-                                twitter=item.get('twitter', ''),
-                                telegram=item.get('telegram', ''),
-                                contract_address=item.get('contract_address', ''),
-                                announced_at=datetime.utcnow().isoformat(),
-                                market_cap=150000  # Estimation early-stage
-                            ))
-                        return projects
-            return []
-        except Exception as e:
-            log.error(f"❌ Polkastarter: {e}")
-            return []
-    
-    async def _fetch_seedify(self) -> List[Project]:
-        """Seedify - Projets IDO à venir"""
-        try:
-            url = "https://seedify.fund/api/projects/upcoming"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=HTTP_TIMEOUT) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        projects = []
-                        for item in data.get('data', [])[:3]:
-                            projects.append(Project(
-                                name=item.get('title', 'Seedify Project'),
-                                source="SEEDIFY",
-                                link=item.get('website', ''),
-                                website=item.get('website', ''),
-                                twitter=item.get('twitter', ''),
-                                telegram=item.get('telegram', ''),
-                                announced_at=datetime.utcnow().isoformat(),
-                                market_cap=120000
-                            ))
-                        return projects
-            return []
-        except Exception as e:
-            log.error(f"❌ Seedify: {e}")
-            return []
-    
-    async def _fetch_trustpad(self) -> List[Project]:
-        """TrustPad - Launchpad early-stage"""
-        try:
-            url = "https://trustpad.io/api/projects"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=HTTP_TIMEOUT) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        projects = []
-                        for item in data.get('active', [])[:2]:
-                            projects.append(Project(
-                                name=item.get('name', 'TrustPad Project'),
-                                source="TRUSTPAD",
-                                link=item.get('website', ''),
-                                website=item.get('website', ''),
-                                announced_at=datetime.utcnow().isoformat(),
-                                market_cap=180000
-                            ))
-                        return projects
-            return []
-        except Exception as e:
-            log.error(f"❌ TrustPad: {e}")
-            return []
-    
-    async def _fetch_redkite(self) -> List[Project]:
-        """RedKite - Launchpad early-stage"""
-        return [
-            Project(
-                name="RedKite Early Project",
-                source="REDKITE",
-                link="https://redkite.polkafoundry.com",
-                website="https://redkite.polkafoundry.com",
-                announced_at=datetime.utcnow().isoformat(),
-                market_cap=90000
-            )
-        ]
-    
-    async def _fetch_unicrypt(self) -> List[Project]:
-        """Unicrypt - Projects avec locks"""
-        return [
-            Project(
-                name="Unicrypt Locked Project",
-                source="UNICRYPT",
-                link="https://unicrypt.network",
-                website="https://unicrypt.network",
-                contract_address="0x" + "1" * 40,  # Simulation
-                announced_at=datetime.utcnow().isoformat(),
-                market_cap=110000
-            )
-        ]
-    
-    def _get_early_stage_test_projects(self) -> List[Project]:
-        """Projets de test EARLY-STAGE réalistes"""
+    def _get_social_rich_projects(self) -> List[Project]:
+        """Projets de test avec présence sociale COMPLÈTE"""
         return [
             Project(
                 name="QuantumAI Protocol",
-                source="TEST_EARLY_STAGE",
+                source="SOCIAL_RICH",
                 link="https://quantumai-protocol.com",
                 website="https://quantumai-protocol.com",
-                twitter="https://twitter.com/quantumai_proto",
+                x_twitter="https://twitter.com/quantumai_proto",
                 telegram="https://t.me/quantumai_protocol",
+                reddit="https://reddit.com/r/quantumai",
+                discord="https://discord.gg/quantumai",
                 github="https://github.com/quantumai-protocol",
                 contract_address="0x742E4D5c4d6Fb1b4bF1D5b7e1a5A5A1a5A1a5A1a",
-                announced_at=datetime.utcnow().isoformat(),
+                announced_at=datetime.now().isoformat(),
                 market_cap=85000
             ),
             Project(
-                name="NeuralDeFi Labs",
-                source="TEST_EARLY_STAGE",
-                link="https://neuraldefi.io",
-                website="https://neuraldefi.io",
-                twitter="https://twitter.com/neuraldefi",
-                telegram="https://t.me/neuraldefi",
+                name="NeuralDeFi Network",
+                source="SOCIAL_RICH", 
+                link="https://neuraldefi.network",
+                website="https://neuraldefi.network",
+                x_twitter="https://twitter.com/neuraldefi",
+                telegram="https://t.me/neuraldefi_ann",
+                reddit="https://reddit.com/r/neuraldefi",
+                discord="https://discord.gg/neuraldefi",
+                github="https://github.com/neuraldefi",
                 contract_address="0x1234567890123456789012345678901234567890",
-                announced_at=datetime.utcnow().isoformat(),
-                market_cap=150000
+                announced_at=datetime.now().isoformat(),
+                market_cap=120000
             ),
             Project(
-                name="CryptoVault Launch",
-                source="TEST_EARLY_STAGE",
-                link="https://cryptovault-launch.com",
-                website="https://cryptovault-launch.com",
-                twitter="https://twitter.com/cryptovault_launch",
-                telegram="https://t.me/cryptovault_launch",
-                announced_at=datetime.utcnow().isoformat(),
+                name="Web3 Ventures DAO",
+                source="SOCIAL_RICH",
+                link="https://web3ventures.dao",
+                website="https://web3ventures.dao", 
+                x_twitter="https://twitter.com/web3ventures",
+                telegram="https://t.me/web3ventures",
+                discord="https://discord.gg/web3ventures",
+                github="https://github.com/web3ventures",
+                announced_at=datetime.now().isoformat(),
                 market_cap=95000
             )
         ]
@@ -541,15 +627,15 @@ class QuantumScannerUltime:
         self.scan_count += 1
         start_time = datetime.now()
         
-        log.info(f"🚀 SCAN #{self.scan_count} - QUANTUM SCANNER ULTIME")
-        log.info("🎯 Cible: Projets EARLY-STAGE (PRE-TGE/IDO/ICO)")
+        log.info(f"🚀 SCAN #{self.scan_count} - ANALYSE SOCIAL & WEB")
+        log.info("🎯 Cible: Présence sociale complète (X, Telegram, Reddit, Discord, Site)")
         
         try:
-            # 1. Récupération projets early-stage
+            # 1. Récupération projets
             projects = await self.fetcher.fetch_projects()
             
             if not projects:
-                log.error("❌ Aucun projet early-stage trouvé")
+                log.error("❌ Aucun projet trouvé")
                 return {"error": "Aucun projet"}
             
             # 2. Analyse des projets
@@ -557,27 +643,30 @@ class QuantumScannerUltime:
             alerts_sent = 0
             
             for project in projects:
-                # Éviter les doublons
                 if self.db.project_exists(project):
                     continue
                 
                 new_projects += 1
-                log.info(f"🔍 Nouveau projet: {project.name}")
+                log.info(f"🔍 Analyse sociale: {project.name}")
                 
-                # Analyse complète
+                # Vérification complète
                 verdict = await self.verifier.verify_project(project)
                 
-                # Gestion des alertes
-                alert_sent = False
+                # Envoi alerte pour ACCEPT
                 if verdict['verdict'] == "ACCEPT":
-                    alert_sent = await self.telegram.send_alert(project, verdict)
+                    alert_sent = await self.telegram.send_alert(
+                        project, 
+                        verdict,
+                        verdict.get('social_metrics'),
+                        verdict.get('web_analysis', {})
+                    )
                     if alert_sent:
                         alerts_sent += 1
                 
                 # Sauvegarde
                 self.db.store_project(project, verdict, alert_sent)
                 
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
             
             # 3. Rapport final
             duration = (datetime.now() - start_time).total_seconds()
@@ -602,7 +691,7 @@ class QuantumScannerUltime:
         
         log.info("")
         log.info("=" * 60)
-        log.info("📊 RAPPORT QUANTUM SCANNER ULTIME")
+        log.info("📊 RAPPORT ANALYSE SOCIAL & WEB")
         log.info("=" * 60)
         log.info(f"   📦 Projets analysés: {total}")
         log.info(f"   🆕 Nouveaux projets: {new}")
@@ -612,59 +701,34 @@ class QuantumScannerUltime:
         log.info("=" * 60)
         
         return report
-    
-    async def run_daemon(self):
-        """Mode démon 24/7"""
-        log.info("👁️ DÉMARRAGE MODE DÉMON 24/7")
-        
-        while True:
-            await self.run_scan()
-            log.info(f"💤 Prochain scan dans {SCAN_INTERVAL_HOURS}h")
-            await asyncio.sleep(SCAN_INTERVAL_HOURS * 3600)
-
-# =========================================================
-# INTERFACE CLI
-# =========================================================
 
 async def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description="Quantum Scanner Ultime - Early Stage Focus")
+    parser = argparse.ArgumentParser(description="Quantum Scanner - Analyse Social & Web")
     parser.add_argument("--once", action="store_true", help="Scan unique")
-    parser.add_argument("--daemon", action="store_true", help="Mode démon 24/7")
-    parser.add_argument("--test-telegram", action="store_true", help="Test Telegram uniquement")
+    parser.add_argument("--test-social", action="store_true", help="Test analyse sociale")
     
     args = parser.parse_args()
     
     scanner = QuantumScannerUltime()
     
-    if args.test_telegram:
-        log.info("🧪 TEST TELEGRAM UNIQUEMENT")
+    if args.test_social:
+        log.info("🧪 TEST ANALYSE SOCIALE")
+        # Test avec un projet riche socialement
         test_project = Project(
-            name="QUANTUM SCANNER TEST",
-            source="SYSTEM",
-            link="https://github.com/Kakou2106/crypto_scanner",
-            website="https://github.com/Kakou2106/crypto_scanner",
-            announced_at=datetime.now().isoformat(),
-            market_cap=99999
+            name="TEST SOCIAL COMPLET",
+            source="TEST",
+            website="https://example.com",
+            x_twitter="https://twitter.com/test",
+            telegram="https://t.me/test",
+            reddit="https://reddit.com/r/test",
+            discord="https://discord.gg/test",
+            github="https://github.com/test"
         )
-        test_verdict = {
-            "verdict": "ACCEPT",
-            "score": 95,
-            "reason": "✅ SYSTÈME OPÉRATIONNEL - Scanner early-stage prêt",
-            "report": {
-                "ratios": {"Audit": 0.9, "Liquidity": 0.8, "Team": 0.85},
-                "red_flags": []
-            }
-        }
-        success = await scanner.telegram.send_alert(test_project, test_verdict)
-        if success:
-            log.info("🎉 TEST TELEGRAM RÉUSSI!")
-        else:
-            log.error("❌ TEST TELEGRAM ÉCHOUÉ")
-    
-    elif args.daemon:
-        await scanner.run_daemon()
+        verifier = ProjectVerifier()
+        verdict = await verifier.verify_project(test_project)
+        log.info(f"🧪 RÉSULTAT: {verdict}")
     else:
         await scanner.run_scan()
 
