@@ -51,7 +51,7 @@ jobs:
     # 6. Upload database as artifact
     - name: Upload database
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: quantum-db-${{ github.run_number }}
         path: quantum.db
@@ -60,7 +60,7 @@ jobs:
     # 7. Upload logs
     - name: Upload logs
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: scan-logs-${{ github.run_number }}
         path: |
