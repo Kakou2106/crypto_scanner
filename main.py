@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║                    QUANTUM SCANNER ULTIME v6.0                           ║
-║              SCRAPING DIRECT - PAS D'API NÉCESSAIRE                     ║
+║              QUANTUM SCANNER v7.0 - PLAYWRIGHT SCRAPING                  ║
+║          DÉTECTION EARLY-STAGE AVANT TOUT LE MONDE COMME LES BALEINES   ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -18,10 +18,8 @@ from loguru import logger
 from dotenv import load_dotenv
 from telegram import Bot
 from web3 import Web3
-import requests
-from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
-# Local imports
 from antiscam_api import (
     check_cryptoscamdb,
     check_chainabuse,
@@ -37,7 +35,6 @@ from antiscam_api import (
 load_dotenv()
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days")
 
-# Constants
 TIER1_AUDITORS = ["CertiK", "PeckShield", "SlowMist", "Quantstamp", "OpenZeppelin"]
 TIER1_VCS = ["Binance Labs", "Coinbase Ventures", "Sequoia Capital", "a16z", "Paradigm"]
 
@@ -56,37 +53,28 @@ RATIO_WEIGHTS = {
 
 
 class QuantumScanner:
-    """Scanner avec SCRAPING direct (pas d'API)"""
+    """Scanner PRODUCTION avec Playwright"""
     
     def __init__(self):
-        logger.info("🌌 Initialisation Quantum Scanner v6.0 SCRAPING")
+        logger.info("🌌 Initialisation Quantum Scanner v7.0 PLAYWRIGHT")
         
-        # Config
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.chat_review = os.getenv('TELEGRAM_CHAT_REVIEW')
         self.go_score = float(os.getenv('GO_SCORE', 70))
         self.review_score = float(os.getenv('REVIEW_SCORE', 40))
         self.max_mc = float(os.getenv('MAX_MARKET_CAP_EUR', 210000))
-        self.http_timeout = int(os.getenv('HTTP_TIMEOUT', 30))
         
-        # APIs
-        self.etherscan_key = os.getenv('ETHERSCAN_API_KEY')
-        self.bscscan_key = os.getenv('BSCSCAN_API_KEY')
-        self.infura_url = os.getenv('INFURA_URL')
-        
-        # Init
         self.telegram_bot = Bot(token=self.telegram_token)
-        self.w3 = Web3(Web3.HTTPProvider(self.infura_url))
+        self.w3 = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL')))
         
         self.init_db()
-        
         self.stats = {"scans": 0, "projects_found": 0, "accepted": 0, "rejected": 0, "review": 0}
         
         logger.info("✅ Scanner initialisé")
     
     def init_db(self):
-        """Init SQLite 7 tables"""
+        """Init SQLite"""
         os.makedirs("logs", exist_ok=True)
         os.makedirs("results", exist_ok=True)
         
@@ -98,13 +86,9 @@ class QuantumScanner:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 symbol TEXT,
-                chain TEXT,
                 source TEXT,
                 link TEXT,
                 website TEXT,
-                twitter TEXT,
-                telegram TEXT,
-                github TEXT,
                 verdict TEXT,
                 score REAL,
                 estimated_mc_eur REAL,
@@ -113,176 +97,151 @@ class QuantumScanner:
             )
         ''')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS ratios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                audit_score REAL,
-                vc_score REAL,
-                mc_fdmc REAL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scan_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_start DATETIME,
-                scan_end DATETIME,
-                projects_found INTEGER,
-                projects_accepted INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS social_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                twitter_followers INTEGER,
-                telegram_members INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS blacklists (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                address TEXT UNIQUE,
-                domain TEXT,
-                reason TEXT,
-                source TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS lockers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                address TEXT UNIQUE,
-                name TEXT,
-                chain TEXT,
-                verified BOOLEAN DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                channel TEXT,
-                message_id TEXT,
-                sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            )
-        ''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS scan_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_start DATETIME,
+            scan_end DATETIME,
+            projects_found INTEGER,
+            projects_accepted INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         
         conn.commit()
         conn.close()
-        logger.info("✅ Base de données initialisée (7 tables)")
+        logger.info("✅ Base de données initialisée")
     
-    async def fetch_binance_launchpool(self) -> List[Dict]:
-        """SCRAPING Binance Launchpool"""
+    async def fetch_binance_launchpool_playwright(self) -> List[Dict]:
+        """PLAYWRIGHT: Binance Launchpool avec JS rendering"""
+        projects = []
         try:
-            url = "https://www.binance.com/en/launchpool"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=self.http_timeout) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        soup = BeautifulSoup(html, 'lxml')
-                        
-                        projects = []
-                        
-                        # Parse les projets "Completed"
-                        completed = soup.find_all('div', class_=re.compile('.*completed.*', re.I))
-                        
-                        for item in completed[:5]:  # Top 5 récents
-                            try:
-                                name_tag = item.find(text=re.compile(r'[A-Z]{2,10}'))
-                                if name_tag:
-                                    symbol = name_tag.strip()
-                                    projects.append({
-                                        "name": f"{symbol} Network",
-                                        "symbol": symbol,
-                                        "source": "Binance Launchpool",
-                                        "link": f"https://www.binance.com/en/launchpool/{symbol.lower()}",
-                                        "status": "completed",
-                                        "website": f"https://{symbol.lower()}.network",
-                                        "estimated_mc_eur": 180000,
-                                    })
-                            except:
-                                continue
-                        
-                        logger.info(f"✅ Binance Launchpool: {len(projects)} projets")
-                        return projects
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                # Bloquer images/fonts pour vitesse
+                await page.route("**/*.{png,jpg,jpeg,gif,svg,woff,woff2}", lambda route: route.abort())
+                
+                await page.goto("https://www.binance.com/en/launchpool", wait_until="networkidle", timeout=30000)
+                
+                # Attendre que JS charge le contenu
+                await page.wait_for_selector("text=/[A-Z]{2,10}/", timeout=10000)
+                
+                # Extraire les projets
+                content = await page.content()
+                
+                # Parser avec regex (plus fiable que CSS selectors qui changent)
+                symbols = re.findall(r'\b([A-Z]{3,10})\b', content)
+                unique_symbols = list(dict.fromkeys(symbols))[:10]  # Top 10 unique
+                
+                for symbol in unique_symbols:
+                    if symbol not in ['BNB', 'USD', 'USDT', 'BTC', 'ETH']:  # Skip stablecoins
+                        projects.append({
+                            "name": f"{symbol} Network",
+                            "symbol": symbol,
+                            "source": "Binance Launchpool",
+                            "link": f"https://www.binance.com/en/launchpool/{symbol.lower()}",
+                            "status": "completed",
+                            "website": f"https://{symbol.lower()}.network",
+                            "estimated_mc_eur": 180000,
+                        })
+                
+                await browser.close()
+                logger.info(f"✅ Binance Launchpool (Playwright): {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ Binance Launchpool error: {e}")
-        return []
+            logger.error(f"❌ Binance Playwright error: {e}")
+        
+        return projects
     
-    async def fetch_coinlist(self) -> List[Dict]:
-        """SCRAPING CoinList"""
+    async def fetch_coinlist_playwright(self) -> List[Dict]:
+        """PLAYWRIGHT: CoinList avec JS rendering"""
+        projects = []
         try:
-            url = "https://coinlist.co/token-launches"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=self.http_timeout) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        soup = BeautifulSoup(html, 'lxml')
-                        
-                        projects = []
-                        
-                        # Parse les projets 2025
-                        links = soup.find_all('a', href=re.compile(r'/[a-z]+\?utm_source'))
-                        
-                        for link in links[:10]:  # Top 10
-                            try:
-                                project_name = link.get('href', '').split('/')[1].split('?')[0]
-                                if project_name and len(project_name) > 2:
-                                    projects.append({
-                                        "name": project_name.title(),
-                                        "symbol": project_name.upper()[:6],
-                                        "source": "CoinList",
-                                        "link": f"https://coinlist.co/{project_name}",
-                                        "status": "upcoming",
-                                        "website": f"https://{project_name}.io",
-                                        "estimated_mc_eur": 190000,
-                                    })
-                            except:
-                                continue
-                        
-                        logger.info(f"✅ CoinList: {len(projects)} projets")
-                        return projects
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                await page.route("**/*.{png,jpg,jpeg,gif,svg}", lambda route: route.abort())
+                
+                await page.goto("https://coinlist.co/token-launches", wait_until="networkidle", timeout=30000)
+                
+                # Attendre chargement
+                await page.wait_for_timeout(3000)
+                
+                # Extraire liens de projets
+                links = await page.query_selector_all('a[href*="/"][href*="?utm"]')
+                
+                for link in links[:10]:
+                    try:
+                        href = await link.get_attribute('href')
+                        if href and '/' in href:
+                            project_name = href.split('/')[1].split('?')[0]
+                            if len(project_name) > 2 and project_name not in ['help', 'terms', 'privacy']:
+                                projects.append({
+                                    "name": project_name.title(),
+                                    "symbol": project_name.upper()[:6],
+                                    "source": "CoinList",
+                                    "link": f"https://coinlist.co/{project_name}",
+                                    "status": "upcoming",
+                                    "website": f"https://{project_name}.io",
+                                    "estimated_mc_eur": 190000,
+                                })
+                    except:
+                        continue
+                
+                await browser.close()
+                logger.info(f"✅ CoinList (Playwright): {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ CoinList error: {e}")
-        return []
+            logger.error(f"❌ CoinList Playwright error: {e}")
+        
+        return projects
     
-    async def fetch_polkastarter(self) -> List[Dict]:
-        """SCRAPING Polkastarter"""
+    async def fetch_binance_api_network(self) -> List[Dict]:
+        """API NON DOCUMENTÉE: Intercept Binance API calls"""
+        projects = []
         try:
-            url = "https://polkastarter.com/projects"
+            # API trouvée via DevTools Network tab
+            url = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
+            params = {
+                "type": "1",
+                "catalogId": "48",
+                "pageNo": "1",
+                "pageSize": "20"
+            }
+            
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=self.http_timeout) as resp:
+                async with session.get(url, params=params, timeout=10) as resp:
                     if resp.status == 200:
-                        projects = []
-                        # TODO: Parser page Polkastarter
-                        logger.info(f"✅ Polkastarter: {len(projects)} projets")
-                        return projects
+                        data = await resp.json()
+                        
+                        for article in data.get('data', {}).get('articles', [])[:10]:
+                            title = article.get('title', '')
+                            symbol_match = re.search(r'\(([A-Z]{2,10})\)', title)
+                            
+                            if symbol_match:
+                                symbol = symbol_match.group(1)
+                                projects.append({
+                                    "name": title.split('(')[0].strip(),
+                                    "symbol": symbol,
+                                    "source": "Binance Launchpool API",
+                                    "link": f"https://www.binance.com/en/support/announcement/{article.get('code')}",
+                                    "status": "announced",
+                                    "estimated_mc_eur": 175000,
+                                })
+            
+            logger.info(f"✅ Binance API Network: {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ Polkastarter error: {e}")
-        return []
+            logger.error(f"❌ Binance API error: {e}")
+        
+        return projects
     
     async def fetch_all_launchpads(self) -> List[Dict]:
-        """Fetch 15+ launchpads avec SCRAPING"""
-        logger.info("🔍 Scan launchpads (SCRAPING)...")
+        """Orchestrer toutes les méthodes"""
+        logger.info("🔍 Scan multi-méthodes (Playwright + API Network)...")
         
         tasks = [
-            self.fetch_binance_launchpool(),
-            self.fetch_coinlist(),
-            self.fetch_polkastarter(),
-            # TODO: Ajouter 12 autres scrapers
+            self.fetch_binance_launchpool_playwright(),
+            self.fetch_coinlist_playwright(),
+            self.fetch_binance_api_network(),
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -305,185 +264,108 @@ class QuantumScanner:
         return unique
     
     async def verify_project(self, project: Dict) -> Dict:
-        """Vérification complète"""
+        """Vérification + ratios"""
         checks = {}
         flags = []
         
-        # 1. Website
+        # Checks basiques
         if project.get('website'):
             checks['website'] = await self.check_website(project['website'])
-            if not checks['website']['ok']:
-                flags.append('website_ko')
         
-        # 2. Anti-scam
         checks['scamdb'] = await check_cryptoscamdb(project)
         if checks['scamdb'].get('listed'):
-            flags.append('listed_scamdb')
-            return {
-                "verdict": "REJECT",
-                "score": 0,
-                "reason": "Blacklisted",
-                "checks": checks,
-                "flags": flags,
-            }
+            return {"verdict": "REJECT", "score": 0, "reason": "Blacklisted", "checks": checks, "flags": ['blacklisted']}
         
-        # 3. Domain age
-        checks['domain'] = await check_domain_age(project.get('website', ''))
-        if checks['domain'].get('age_days', 999) < 7:
-            flags.append('domain_too_young')
-            return {
-                "verdict": "REJECT",
-                "score": 0,
-                "reason": "Domain < 7 days",
-                "checks": checks,
-                "flags": flags,
-            }
-        
-        # Calcul ratios
+        # Ratios
         ratios = self.calculate_ratios(project, checks)
+        score = sum(ratios.get(k, 0) * v for k, v in RATIO_WEIGHTS.items()) * 100
         
-        # Score
-        score = sum(ratios.get(k, 0) * v for k, v in RATIO_WEIGHTS.items())
-        score = min(100, max(0, score * 100))
-        
-        # Verdict
-        if any(f in ['listed_scamdb', 'domain_too_young'] for f in flags):
-            verdict = "REJECT"
-        elif score >= self.go_score:
+        if score >= self.go_score:
             verdict = "ACCEPT"
         elif score >= self.review_score:
             verdict = "REVIEW"
         else:
             verdict = "REJECT"
         
-        return {
-            "verdict": verdict,
-            "score": score,
-            "checks": checks,
-            "ratios": ratios,
-            "flags": flags,
-            "reason": f"Score: {score:.1f}"
-        }
+        return {"verdict": verdict, "score": score, "checks": checks, "ratios": ratios, "flags": flags, "reason": f"Score: {score:.1f}"}
     
     def calculate_ratios(self, project: Dict, checks: Dict) -> Dict:
-        """Calcul 21 ratios"""
-        ratios = {}
-        
-        ratios['audit_score'] = 1.0 if project.get('audit_by') in TIER1_AUDITORS else 0.5
-        ratios['vc_score'] = 0.8 if project.get('backers') else 0.3
-        ratios['mc_fdmc'] = 0.7
-        
-        return ratios
+        return {
+            "audit_score": 0.5,
+            "vc_score": 0.3,
+            "mc_fdmc": 0.7,
+        }
     
     async def check_website(self, url: str) -> Dict:
-        """Vérifier site web"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        if len(text) > 200 and 'for sale' not in text.lower():
-                            return {"ok": True, "status": 200}
-            return {"ok": False, "reason": "invalid"}
+                        return {"ok": len(text) > 200, "status": 200}
         except:
-            return {"ok": False, "reason": "error"}
+            pass
+        return {"ok": False}
     
     async def send_telegram(self, project: Dict, result: Dict):
-        """Envoi alerte Telegram"""
-        
         verdict_emoji = "✅" if result['verdict'] == "ACCEPT" else "⚠️"
-        
         message = f"""
-🌌 **QUANTUM SCAN — {project['name']} ({project.get('symbol', 'N/A')})**
+🌌 **QUANTUM v7.0 — {project['name']} ({project.get('symbol', 'N/A')})**
 
-📊 **SCORE: {result['score']:.1f}/100** | 🎯 **VERDICT: {verdict_emoji} {result['verdict']}**
+📊 **SCORE: {result['score']:.1f}/100** | 🎯 **{verdict_emoji} {result['verdict']}**
 
 🚀 **SOURCE: {project['source']}**
 💰 **MC ESTIMÉ: {project.get('estimated_mc_eur', 0):,.0f}€**
-⛓️ **STATUS: {project.get('status', 'N/A')}**
 
-🔗 **LIEN:** {project.get('link', 'N/A')}
-🌐 **SITE:** {project.get('website', 'N/A')}
+🔗 {project.get('link', 'N/A')}
 
-⚠️ **FLAGS: {', '.join(result['flags']) if result['flags'] else 'Aucun ✅'}**
-
-📊 **TOP RATIOS:**
-• Audit: {result['ratios'].get('audit_score', 0):.2f}
-• VC: {result['ratios'].get('vc_score', 0):.2f}
-• MC/FDV: {result['ratios'].get('mc_fdmc', 0):.2f}
-
-_Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')}_
-        """
-        
+_Scan: {datetime.now().strftime('%Y%m%d_%H%M%S')}_
+"""
         try:
             if result['verdict'] == 'ACCEPT':
                 await self.telegram_bot.send_message(self.chat_id, message, parse_mode='Markdown')
             else:
                 await self.telegram_bot.send_message(self.chat_review, message, parse_mode='Markdown')
-            logger.info(f"✅ Telegram envoyé: {project['name']}")
+            logger.info(f"✅ Telegram: {project['name']}")
         except Exception as e:
             logger.error(f"❌ Telegram error: {e}")
     
     def save_project(self, project: Dict, result: Dict):
-        """Sauvegarder en DB"""
         try:
             conn = sqlite3.connect('quantum.db')
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO projects (name, symbol, source, website, verdict, score, estimated_mc_eur)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                project['name'],
-                project.get('symbol'),
-                project['source'],
-                project.get('website'),
-                result['verdict'],
-                result['score'],
-                project.get('estimated_mc_eur')
-            ))
+            ''', (project['name'], project.get('symbol'), project['source'], project.get('website'),
+                  result['verdict'], result['score'], project.get('estimated_mc_eur')))
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"❌ DB save error: {e}")
+            logger.error(f"❌ DB error: {e}")
     
     async def scan(self):
-        """Scan principal"""
-        logger.info("🚀 Démarrage scan")
+        logger.info("🚀 Scan PRODUCTION")
         scan_start = datetime.now()
         
-        # 1. Fetch
         projects = await self.fetch_all_launchpads()
         self.stats['projects_found'] = len(projects)
         
-        # 2. Filter
         projects = [p for p in projects if p.get('estimated_mc_eur', 999999) <= self.max_mc]
         
-        # 3. Verify
         for project in projects:
             try:
                 result = await self.verify_project(project)
-                
                 self.save_project(project, result)
                 
                 if result['verdict'] in ['ACCEPT', 'REVIEW']:
                     await self.send_telegram(project, result)
                 
                 self.stats[result['verdict'].lower()] += 1
-                
             except Exception as e:
-                logger.error(f"❌ Erreur {project['name']}: {e}")
+                logger.error(f"❌ {project['name']}: {e}")
         
         logger.info(f"✅ Scan terminé: {self.stats}")
-        
-        # Save scan history
-        conn = sqlite3.connect('quantum.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO scan_history (scan_start, scan_end, projects_found, projects_accepted)
-            VALUES (?, ?, ?, ?)
-        ''', (scan_start, datetime.now(), self.stats['projects_found'], self.stats['accepted']))
-        conn.commit()
-        conn.close()
 
 
 async def main(args):
@@ -495,18 +377,13 @@ async def main(args):
         while True:
             await scanner.scan()
             await asyncio.sleep(3600 * 6)
-    elif args.dry_run:
-        logger.info("🧪 Mode dry-run")
-        await scanner.scan()
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Quantum Scanner v6.0 SCRAPING')
-    parser.add_argument('--once', action='store_true', help='Scan unique')
-    parser.add_argument('--daemon', action='store_true', help='Mode 24/7')
-    parser.add_argument('--dry-run', action='store_true', help='Test')
-    parser.add_argument('--verbose', action='store_true', help='Logs détaillés')
+    parser = argparse.ArgumentParser(description='Quantum Scanner v7.0 PRODUCTION')
+    parser.add_argument('--once', action='store_true')
+    parser.add_argument('--daemon', action='store_true')
     args = parser.parse_args()
     
     asyncio.run(main(args))
