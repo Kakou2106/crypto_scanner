@@ -44,7 +44,7 @@ jobs:
     
     - name: Run Quantum Scanner
       run: python main.py --once
-      continue-on-error: true  # Continue même en cas d'erreur
+      continue-on-error: true
     
     - name: Upload scan results
       uses: actions/upload-artifact@v4
@@ -52,13 +52,6 @@ jobs:
         name: quantum-scan-results
         path: |
           quantum.db
-          *.log
+          quantum_scanner.log
         retention-days: 7
-    
-    - name: Upload workflow logs
-      if: always()  # Toujours exécuter, même en échec
-      uses: actions/upload-artifact@v4
-      with:
-        name: workflow-logs
-        path: ${{ github.workspace }}/../../*.log
-        retention-days: 3
+        if-no-files-found: ignore
