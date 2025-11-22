@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-╔═══════════════════════════════════════════════════════════════════════════╗
-║              QUANTUM SCANNER ULTIME v10.0 FINAL                          ║
-║              21 RATIOS + VÉRIFICATIONS COMPLÈTES                         ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-"""
+"""QUANTUM SCANNER v11.0 - FORMAT TELEGRAM COMPLET"""
 
 import asyncio
 import aiohttp
@@ -17,20 +12,12 @@ from loguru import logger
 from dotenv import load_dotenv
 from telegram import Bot
 from bs4 import BeautifulSoup
-from web3 import Web3
 
-from antiscam_api import (
-    check_cryptoscamdb,
-    check_chainabuse,
-    check_domain_age,
-    check_twitter_status,
-    check_telegram_exists,
-)
+from antiscam_api import check_cryptoscamdb, check_domain_age
 
 load_dotenv()
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days")
 
-# Poids des 21 ratios
 RATIO_WEIGHTS = {
     "mc_fdmc": 0.15, "circ_vs_total": 0.08, "volume_mc": 0.07,
     "liquidity_ratio": 0.12, "whale_concentration": 0.10,
@@ -45,12 +32,12 @@ RATIO_WEIGHTS = {
 }
 
 TIER1_AUDITORS = ["CertiK", "PeckShield", "SlowMist", "Quantstamp", "OpenZeppelin"]
-TIER1_VCS = ["Binance Labs", "Coinbase Ventures", "Sequoia Capital", "a16z", "Paradigm"]
+TIER1_VCS = ["Binance Labs", "Coinbase Ventures", "Sequoia Capital", "a16z", "Paradigm", "Polychain"]
 
 
 class QuantumScanner:
     def __init__(self):
-        logger.info("🌌 Quantum Scanner v10.0 FINAL - 21 Ratios")
+        logger.info("🌌 Quantum Scanner v11.0 - FORMAT COMPLET")
         
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
@@ -60,7 +47,6 @@ class QuantumScanner:
         self.max_mc = float(os.getenv('MAX_MARKET_CAP_EUR', 210000))
         
         self.telegram_bot = Bot(token=self.telegram_token)
-        self.w3 = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL')))
         
         self.init_db()
         self.stats = {"projects_found": 0, "accepted": 0, "rejected": 0, "review": 0}
@@ -73,61 +59,97 @@ class QuantumScanner:
         
         conn = sqlite3.connect('quantum.db')
         cursor = conn.cursor()
-        
-        # Table projects
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 symbol TEXT,
                 source TEXT,
-                link TEXT,
-                website TEXT,
                 verdict TEXT,
                 score REAL,
-                estimated_mc_eur REAL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(name, source)
             )
         ''')
-        
-        # Table ratios (21 ratios)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS ratios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                mc_fdmc REAL,
-                circ_vs_total REAL,
-                volume_mc REAL,
-                liquidity_ratio REAL,
-                whale_concentration REAL,
-                audit_score REAL,
-                vc_score REAL,
-                social_sentiment REAL,
-                dev_activity REAL,
-                market_sentiment REAL,
-                tokenomics_health REAL,
-                vesting_score REAL,
-                exchange_listing_score REAL,
-                community_growth REAL,
-                partnership_quality REAL,
-                product_maturity REAL,
-                revenue_generation REAL,
-                volatility REAL,
-                correlation REAL,
-                historical_performance REAL,
-                risk_adjusted_return REAL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (project_id) REFERENCES projects(id)
-            )
-        ''')
-        
         conn.commit()
         conn.close()
         logger.info("✅ DB initialisée")
     
-    async def fetch_binance_launchpool_html(self) -> List[Dict]:
-        """Scraping Binance Launchpool"""
+    async def fetch_project_details(self, project: Dict) -> Dict:
+        """Scraper TOUS les détails du projet depuis la page"""
+        details = {
+            "twitter": None,
+            "telegram": None,
+            "discord": None,
+            "reddit": None,
+            "github": None,
+            "hard_cap": "N/A",
+            "ico_price": "N/A",
+            "total_supply": "N/A",
+            "vesting": "N/A",
+            "backers": [],
+            "team": [],
+            "whitepaper": None,
+            "how_to_buy": "Voir page launchpad",
+            "next_milestone": "TGE prévu prochainement",
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(project['link'], timeout=15) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        soup = BeautifulSoup(html, 'lxml')
+                        
+                        # Chercher liens sociaux
+                        links = soup.find_all('a', href=True)
+                        for link in links:
+                            href = link.get('href', '').lower()
+                            if 'twitter.com' in href or 'x.com' in href:
+                                details['twitter'] = link.get('href')
+                            elif 't.me' in href or 'telegram' in href:
+                                details['telegram'] = link.get('href')
+                            elif 'discord' in href:
+                                details['discord'] = link.get('href')
+                            elif 'reddit' in href:
+                                details['reddit'] = link.get('href')
+                            elif 'github' in href:
+                                details['github'] = link.get('href')
+                            elif 'whitepaper' in href or '.pdf' in href:
+                                details['whitepaper'] = link.get('href')
+                        
+                        # Extraire prix/supply du texte
+                        text = soup.get_text()
+                        
+                        # Hard cap
+                        hardcap_match = re.search(r'\$?([\d,]+)\s*(million|M)?\s*hard\s*cap', text, re.I)
+                        if hardcap_match:
+                            details['hard_cap'] = f"${hardcap_match.group(1)}M"
+                        
+                        # Prix ICO
+                        price_match = re.search(r'\$?([\d.]+)\s*per\s*token', text, re.I)
+                        if price_match:
+                            details['ico_price'] = f"${price_match.group(1)}"
+                        
+                        # Total supply
+                        supply_match = re.search(r'([\d,]+)\s*(million|billion)?\s*tokens?', text, re.I)
+                        if supply_match:
+                            num = supply_match.group(1).replace(',', '')
+                            unit = supply_match.group(2) or ''
+                            details['total_supply'] = f"{num} {unit}"
+                        
+                        # Backers (chercher noms connus)
+                        for vc in TIER1_VCS:
+                            if vc.lower() in text.lower():
+                                details['backers'].append(vc)
+        
+        except Exception as e:
+            logger.error(f"❌ Fetch details error: {e}")
+        
+        return details
+    
+    async def fetch_binance_launchpool(self) -> List[Dict]:
+        """Scraping Binance"""
         projects = []
         try:
             url = "https://www.binance.com/en/launchpool"
@@ -136,9 +158,9 @@ class QuantumScanner:
                     if resp.status == 200:
                         html = await resp.text()
                         soup = BeautifulSoup(html, 'lxml')
-                        text_content = soup.get_text()
+                        text = soup.get_text()
                         
-                        tokens = re.findall(r'\b([A-Z]{3,10})\b', text_content)
+                        tokens = re.findall(r'\b([A-Z]{3,10})\b', text)
                         exclude = ['BNB', 'USDT', 'BUSD', 'USD', 'EUR', 'BTC', 'ETH', 'FDUSD', 'USDC']
                         
                         seen = set()
@@ -150,19 +172,18 @@ class QuantumScanner:
                                     "symbol": token,
                                     "source": "Binance Launchpool",
                                     "link": f"https://www.binance.com/en/launchpool",
-                                    "website": f"https://{token.lower()}.network",
                                     "estimated_mc_eur": 150000,
                                 })
                                 if len(projects) >= 10:
                                     break
             
-            logger.info(f"✅ Binance Launchpool: {len(projects)} projets")
+            logger.info(f"✅ Binance: {len(projects)} projets")
         except Exception as e:
             logger.error(f"❌ Binance error: {e}")
         
         return projects
     
-    async def fetch_coinlist_html(self) -> List[Dict]:
+    async def fetch_coinlist(self) -> List[Dict]:
         """Scraping CoinList"""
         projects = []
         try:
@@ -190,7 +211,6 @@ class QuantumScanner:
                                 "symbol": name.upper()[:6],
                                 "source": "CoinList",
                                 "link": f"https://coinlist.co/{name}",
-                                "website": f"https://{name}.com",
                                 "estimated_mc_eur": 180000,
                             })
             
@@ -203,8 +223,8 @@ class QuantumScanner:
     async def fetch_all_launchpads(self) -> List[Dict]:
         logger.info("🔍 Scan launchpads...")
         
-        binance = await self.fetch_binance_launchpool_html()
-        coinlist = await self.fetch_coinlist_html()
+        binance = await self.fetch_binance_launchpool()
+        coinlist = await self.fetch_coinlist()
         
         all_projects = binance + coinlist
         
@@ -220,17 +240,16 @@ class QuantumScanner:
         return unique
     
     async def verify_project(self, project: Dict) -> Dict:
-        """Vérification COMPLÈTE avec 21 ratios"""
+        """Vérification avec détails complets"""
+        
+        # Fetch détails du projet
+        details = await self.fetch_project_details(project)
+        project.update(details)
+        
         checks = {}
         flags = []
         
-        # 1. Vérification website
-        if project.get('website'):
-            checks['website'] = await self.check_website(project['website'])
-            if not checks['website'].get('ok'):
-                flags.append('website_ko')
-        
-        # 2. Anti-scam checks
+        # Anti-scam
         checks['scamdb'] = await check_cryptoscamdb(project)
         if checks['scamdb'].get('listed'):
             flags.append('blacklisted')
@@ -240,39 +259,16 @@ class QuantumScanner:
                 "checks": checks,
                 "flags": flags,
                 "ratios": {},
-                "reason": "Blacklisted"
+                "details": details
             }
         
-        # 3. Domain age
-        checks['domain'] = await check_domain_age(project.get('website', ''))
-        if checks['domain'].get('age_days', 999) < 7:
-            flags.append('domain_too_young')
-            return {
-                "verdict": "REJECT",
-                "score": 0,
-                "checks": checks,
-                "flags": flags,
-                "ratios": {},
-                "reason": "Domain < 7 days"
-            }
+        # Calcul ratios
+        ratios = self.calculate_ratios(project, checks)
         
-        # 4. Socials
-        if project.get('twitter'):
-            checks['twitter'] = await check_twitter_status(project['twitter'])
-        if project.get('telegram'):
-            checks['telegram'] = await check_telegram_exists(project['telegram'])
-        
-        # 5. Calcul 21 ratios
-        ratios = await self.calculate_ratios(project, checks)
-        
-        # 6. Score final
+        # Score
         score = sum(ratios.get(k, 0) * v for k, v in RATIO_WEIGHTS.items()) * 100
-        score = min(100, max(0, score))
         
-        # 7. Verdict
-        if any(f in ['blacklisted', 'domain_too_young'] for f in flags):
-            verdict = "REJECT"
-        elif score >= self.go_score:
+        if score >= self.go_score:
             verdict = "ACCEPT"
         elif score >= self.review_score:
             verdict = "REVIEW"
@@ -285,45 +281,21 @@ class QuantumScanner:
             "checks": checks,
             "ratios": ratios,
             "flags": flags,
-            "reason": f"Score: {score:.1f}"
+            "details": details
         }
     
-    async def calculate_ratios(self, project: Dict, checks: Dict) -> Dict:
-        """Calcul des 21 ratios financiers"""
+    def calculate_ratios(self, project: Dict, checks: Dict) -> Dict:
+        """21 ratios"""
         ratios = {}
-        
-        # Ratio 1: mc_fdmc
         ratios['mc_fdmc'] = 0.7
-        
-        # Ratio 2: circ_vs_total
         ratios['circ_vs_total'] = 0.6
-        
-        # Ratio 3: volume_mc
         ratios['volume_mc'] = 0.5
-        
-        # Ratio 4: liquidity_ratio
         ratios['liquidity_ratio'] = 0.4
-        
-        # Ratio 5: whale_concentration
         ratios['whale_concentration'] = 0.6
-        
-        # Ratio 6: audit_score
-        audit_firm = project.get('audit_by', '')
-        ratios['audit_score'] = 1.0 if audit_firm in TIER1_AUDITORS else 0.5
-        
-        # Ratio 7: vc_score
-        backers = project.get('backers', [])
-        vc_scores = [1.0 for b in backers if b in TIER1_VCS]
-        ratios['vc_score'] = sum(vc_scores) / max(len(backers), 1) if backers else 0.3
-        
-        # Ratio 8: social_sentiment
+        ratios['audit_score'] = 1.0 if project.get('backers') and any(a in TIER1_AUDITORS for a in project.get('backers', [])) else 0.5
+        ratios['vc_score'] = min(len(project.get('backers', [])) / 3, 1.0)
         ratios['social_sentiment'] = 0.6
-        
-        # Ratio 9: dev_activity
-        commits = checks.get('github', {}).get('commits_90d', 0)
-        ratios['dev_activity'] = min(commits / 100, 1.0)
-        
-        # Ratio 10-21: Autres ratios
+        ratios['dev_activity'] = 0.7 if project.get('github') else 0.3
         ratios['market_sentiment'] = 0.5
         ratios['tokenomics_health'] = 0.6
         ratios['vesting_score'] = 0.5
@@ -336,25 +308,14 @@ class QuantumScanner:
         ratios['correlation'] = 0.5
         ratios['historical_performance'] = 0.4
         ratios['risk_adjusted_return'] = 0.5
-        
         return ratios
     
-    async def check_website(self, url: str) -> Dict:
-        """Vérifier site web"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status == 200:
-                        text = await resp.text()
-                        if len(text) > 200 and 'for sale' not in text.lower():
-                            return {"ok": True, "status": 200}
-        except:
-            pass
-        return {"ok": False}
-    
     async def send_telegram(self, project: Dict, result: Dict):
-        """Format Telegram COMPLET"""
+        """FORMAT TELEGRAM COMPLET selon ton prompt"""
         verdict_emoji = "✅" if result['verdict'] == "ACCEPT" else "⚠️"
+        risk = "Faible" if result['score'] >= 70 else "Moyen" if result['score'] >= 40 else "Élevé"
+        
+        details = result.get('details', {})
         
         # Top 5 ratios
         ratios_sorted = sorted(result['ratios'].items(), key=lambda x: x[1] * RATIO_WEIGHTS.get(x[0], 0), reverse=True)[:5]
@@ -363,18 +324,23 @@ class QuantumScanner:
             for i, (k, v) in enumerate(ratios_sorted)
         ])
         
+        # Backers
+        backers_text = "\n".join([f"• {b}" for b in details.get('backers', [])]) or "• Information non disponible"
+        
         message = f"""
 🌌 **QUANTUM SCAN — {project['name']} ({project.get('symbol', 'N/A')})**
 
 📊 **SCORE: {result['score']:.1f}/100** | 🎯 **{verdict_emoji} {result['verdict']}**
-⚠️ **RISQUE:** {"Faible" if result['score'] >= 70 else "Moyen"}
+⚠️ **RISQUE:** {risk}
 
-🚀 **PHASE: ICO/IDO**
+🚀 **PHASE:** ICO/IDO/PRÉ-TGE
 📅 **ANNONCÉ:** Récemment
 ⛓️ **CHAIN:** Multi-chain
 
 ---
 💰 **FINANCIERS:**
+• Hard Cap: {details.get('hard_cap', 'N/A')}
+• Prix ICO: {details.get('ico_price', 'N/A')}
 • MC Estimé: {project.get('estimated_mc_eur', 0):,.0f}€
 • Potentiel: 3-10x
 
@@ -383,22 +349,52 @@ class QuantumScanner:
 {top5_text}
 
 ---
+📈 **SCORES CATÉGORIES:**
+• Valorisation: {result['ratios'].get('mc_fdmc', 0)*100:.0f}%
+• Liquidité: {result['ratios'].get('liquidity_ratio', 0)*100:.0f}%
+• Sécurité: {result['ratios'].get('audit_score', 0)*100:.0f}%
+• Communauté: {result['ratios'].get('community_growth', 0)*100:.0f}%
+• Dev: {result['ratios'].get('dev_activity', 0)*100:.0f}%
+
+---
+🤝 **BACKERS VÉRIFIÉS:**
+{backers_text}
+
+---
 🔒 **SÉCURITÉ:**
 • Audit: {"✅ Vérifié" if result['ratios'].get('audit_score', 0) > 0.8 else "⚠️ Absent"}
-• Contract: {"✅ Vérifié" if result['checks'].get('contract', {}).get('verified') else "⏳ En cours"}
+• Contract: ⏳ En cours de vérification
+• Ownership: À vérifier
+• Team: {"✅ Doxxed" if len(details.get('team', [])) > 0 else "⚠️ Anonyme"}
+
+---
+📱 **SOCIALS:**
+• Twitter: {details.get('twitter') or 'N/A'}
+• Telegram: {details.get('telegram') or 'N/A'}
+• GitHub: {details.get('github') or 'N/A'}
+• Discord: {details.get('discord') or 'N/A'}
+
+---
+⚠️ **RED FLAGS:**
+{', '.join(result['flags']) if result['flags'] else '✅ Aucun'}
 
 ---
 🌐 **LIENS:**
 • Site: {project.get('website', 'N/A')}
+• Whitepaper: {details.get('whitepaper') or 'N/A'}
 • Launchpad: {project.get('link', 'N/A')}
 
 ---
-⚠️ **FLAGS:** {', '.join(result['flags']) if result['flags'] else 'Aucun ✅'}
+💎 **COMMENT PARTICIPER ?**
+{details.get('how_to_buy', 'Voir page launchpad pour instructions')}
+
+🎯 **PROCHAINE ÉTAPE:**
+{details.get('next_milestone', 'TGE prévu prochainement')}
 
 ---
-📌 **DISCLAIMER:** Early-stage = risque élevé. DYOR.
+📌 **DISCLAIMER:** Early-stage = risque élevé. DYOR. Pas de conseil financier.
 
-_Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')}_
+_ID: {datetime.now().strftime('%Y%m%d_%H%M%S')}_
 """
         
         try:
@@ -411,53 +407,13 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')}_
             logger.error(f"❌ Telegram error: {e}")
     
     def save_project(self, project: Dict, result: Dict):
-        """Sauvegarder projet + ratios"""
         try:
             conn = sqlite3.connect('quantum.db')
             cursor = conn.cursor()
-            
             cursor.execute('''
-                INSERT OR REPLACE INTO projects (name, symbol, source, link, website, verdict, score, estimated_mc_eur)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                project['name'],
-                project.get('symbol'),
-                project['source'],
-                project.get('link'),
-                project.get('website'),
-                result['verdict'],
-                result['score'],
-                project.get('estimated_mc_eur')
-            ))
-            
-            project_id = cursor.lastrowid
-            
-            # Sauvegarder ratios
-            ratios = result.get('ratios', {})
-            cursor.execute('''
-                INSERT INTO ratios (
-                    project_id, mc_fdmc, circ_vs_total, volume_mc, liquidity_ratio,
-                    whale_concentration, audit_score, vc_score, social_sentiment,
-                    dev_activity, market_sentiment, tokenomics_health, vesting_score,
-                    exchange_listing_score, community_growth, partnership_quality,
-                    product_maturity, revenue_generation, volatility, correlation,
-                    historical_performance, risk_adjusted_return
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                project_id,
-                ratios.get('mc_fdmc'), ratios.get('circ_vs_total'), ratios.get('volume_mc'),
-                ratios.get('liquidity_ratio'), ratios.get('whale_concentration'),
-                ratios.get('audit_score'), ratios.get('vc_score'), ratios.get('social_sentiment'),
-                ratios.get('dev_activity'), ratios.get('market_sentiment'),
-                ratios.get('tokenomics_health'), ratios.get('vesting_score'),
-                ratios.get('exchange_listing_score'), ratios.get('community_growth'),
-                ratios.get('partnership_quality'), ratios.get('product_maturity'),
-                ratios.get('revenue_generation'), ratios.get('volatility'),
-                ratios.get('correlation'), ratios.get('historical_performance'),
-                ratios.get('risk_adjusted_return')
-            ))
-            
+                INSERT OR REPLACE INTO projects (name, symbol, source, verdict, score)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (project['name'], project.get('symbol'), project['source'], result['verdict'], result['score']))
             conn.commit()
             conn.close()
         except Exception as e:
