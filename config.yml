@@ -1,7 +1,22 @@
+# ============================================================================
+# QUANTUM SCANNER ULTIME - CONFIGURATION COMPLÈTE EARLY-STAGE
+# ============================================================================
+
+# ================================
+# SEUILS & SCAN
+# ================================
 MAX_MARKET_CAP_EUR: 210000
+GO_SCORE: 70
+REVIEW_SCORE: 40
 SCAN_INTERVAL_HOURS: 6
+MAX_PROJECTS_PER_SCAN: 50
+HTTP_TIMEOUT: 30
+API_DELAY: 1.0
 DRY_RUN: false
 
+# ================================
+# POIDS DES 21 RATIOS EARLY-STAGE
+# ================================
 RATIO_WEIGHTS:
   mc_fdv: 12
   liquidity_ratio: 18
@@ -10,9 +25,72 @@ RATIO_WEIGHTS:
   lp_locked: 15
   blacklisted: -30
   antiscam: -50
+  whale_concentration: 10
+  audit_score: 8
+  vc_score: 5
+  social_sentiment: 5
+  dev_activity: 12
+  market_sentiment: 5
+  tokenomics_health: 10
+  vesting_score: 8
+  exchange_listing_score: 5
+  community_growth: 5
+  partnership_quality: 5
+  product_maturity: 5
+  revenue_generation: 5
+  volatility: 5
+  correlation: 5
+  historical_performance: 5
+  risk_adjusted_return: 5
 
+# ================================
+# SOURCES API EARLY-STAGE
+# ================================
 ENABLED_SOURCES:
   - binance_launchpad
   - coinlist
   - polkastarter
-  # ... (39 autres sources)
+  - seedify
+  - trustpad
+  - dxsale
+  - uncx
+  - team_finance
+  - duckstarter
+  - bscstation
+  - paid_network
+  # TODO[HUMAN]: Ajouter autres launchpads si nécessaire
+
+# ================================
+# TELEGRAM (déjà dans .env)
+# ================================
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_CHAT_ID
+# TELEGRAM_CHAT_REVIEW
+
+# ================================
+# API BLOCKCHAIN
+# ================================
+# ETHERSCAN_API_KEY
+# BSCSCAN_API_KEY
+# POLYGONSCAN_API_KEY
+INFURA_URL: https://mainnet.infura.io/v3/6076aef5ef3344979320210486f4eeee
+
+# ================================
+# AUTRES API (OPTIONNEL, FUTUR)
+# ================================
+COINLIST_API_KEY:
+KUCOIN_API_KEY:
+LUNARCRUSH_API_KEY:
+DUNE_API_KEY:
+COINGECKO_API_KEY:
+COINMARKETCAP_API_KEY:
+TWITTER_BEARER_TOKEN:
+SLACK_WEBHOOK_URL:
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# - Vérifier que toutes les clés API sont présentes dans .env
+# - Tous les ratios doivent être calculés dans quantum_scanner_ultime.py
+# - SCAN_INTERVAL_HOURS définit la fréquence daemon ou cron GitHub Actions
+# - MAX_PROJECTS_PER_SCAN pour limiter charge API
