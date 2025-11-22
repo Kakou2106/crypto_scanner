@@ -568,41 +568,52 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | 21 ratios_
             logger.error(f"❌ DB error: {e}")
     
     async def scan(self):
-        """🔥 SCAN CORRIGÉ - LE FIX CRITIQUE 🔥"""
+        """SCAN FINAL CORRIGÉ"""
         logger.info("🚀 SCAN ULTIME - 30+ sources + 21 ratios")
         
-        projects = await self.fetch_all_sources()
-        self.stats['projects_found'] = len(projects)
-        
-        logger.info(f"📊 {len(projects)} projets trouvés - DÉMARRAGE ANALYSE")
-        
-        # LA BOUCLE QUI MANQUAIT AVANT !!!
-        for i, project in enumerate(projects, 1):
-            try:
-                logger.info(f"🔍 [{i}/{len(projects)}] Analyse: {project['name']}...")
-                
-                result = await self.verify_project_complete(project)
-                self.save_project_complete(project, result)
-                await self.send_telegram_complete(project, result)
-                
-                verdict_key = result['verdict'].lower()
-                if verdict_key == 'reject':
-                    verdict_key = 'rejected'
-                elif verdict_key == 'accept':
-                    verdict_key = 'accepted'
-                self.stats[verdict_key] += 1
-                
-                logger.info(f"✅ [{i}/{len(projects)}] {project['name']}: {result['verdict']} ({result['score']:.1f}%)")
-                
-                await asyncio.sleep(0.1)
-                
-            except Exception as e:
-                logger.error(f"❌ [{i}/{len(projects)}] {project.get('name', 'Unknown')}: {e}")
-                continue
-        
-        logger.info(f"✅ SCAN TERMINÉ!")
-        logger.info(f"📊 STATS: {self.stats}")
-        logger.info(f"📨 {self.stats['alerts_sent']} alertes envoyées")
+        try:
+            # Fetch projets
+            projects = await self.fetch_all_sources()
+            self.stats['projects_found'] = len(projects)
+            
+            logger.info(f"📊 {len(projects)} projets trouvés - DÉMARRAGE ANALYSE")
+            
+            if len(projects) == 0:
+                logger.warning("⚠️ Aucun projet trouvé !")
+                return
+            
+            # BOUCLE D'ANALYSE
+            for i, project in enumerate(projects, 1):
+                try:
+                    logger.info(f"🔍 [{i}/{len(projects)}] {project['name']}...")
+                    
+                    result = await self.verify_project_complete(project)
+                    self.save_project_complete(project, result)
+                    await self.send_telegram_complete(project, result)
+                    
+                    verdict_key = result['verdict'].lower()
+                    if verdict_key == 'reject':
+                        verdict_key = 'rejected'
+                    elif verdict_key == 'accept':
+                        verdict_key = 'accepted'
+                    self.stats[verdict_key] += 1
+                    
+                    logger.info(f"✅ {project['name']}: {result['verdict']} ({result['score']:.1f})")
+                    
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Erreur {project.get('name', 'Unknown')}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            
+            logger.info(f"✅ SCAN TERMINÉ: {self.stats}")
+            
+        except Exception as e:
+            logger.error(f"❌ ERREUR CRITIQUE dans scan(): {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
 
 
 async def main(args):
