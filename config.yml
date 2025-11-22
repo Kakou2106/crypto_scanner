@@ -1,37 +1,18 @@
-scanner:
-  scan_interval_hours: 6
-  max_projects_per_scan: 20  # Réduit pour focus sur la qualité
-  dry_run: false
-  cache_ttl_hours: 24
+MAX_MARKET_CAP_EUR: 210000
+SCAN_INTERVAL_HOURS: 6
+DRY_RUN: false
 
-verification:
-  min_score_accept: 70
-  max_market_cap_eur: 150000  # Seuil réduit pour early stage
-  min_lp_ratio: 0.05  # Adapté aux petits caps
-  max_whale_concentration: 0.45
-  min_domain_age_days: 15  # Plus flexible pour nouveaux projets
-  min_website_content_chars: 150
+RATIO_WEIGHTS:
+  mc_fdv: 12
+  liquidity_ratio: 18
+  circ_vs_total: 8
+  contract_verified: 20
+  lp_locked: 15
+  blacklisted: -30
+  antiscam: -50
 
-ratios:
-  weights:
-    mc_fdmc: 0.08  # Plus important pour early stage
-    circ_vs_total: 0.06
-    volume_mc: 0.04
-    liquidity_ratio: 0.09  # Critique pour petits caps
-    whale_concentration: 0.08
-    audit_score: 0.06
-    vc_score: 0.05
-    social_sentiment: 0.03
-    dev_activity: 0.07
-    market_sentiment: 0.02
-    tokenomics_health: 0.08
-    vesting_score: 0.07
-    exchange_listing_score: 0.03
-    community_growth: 0.04
-    partnership_quality: 0.03
-    product_maturity: 0.05
-    revenue_generation: 0.04
-    volatility: 0.02
-    correlation: 0.01
-    historical_performance: 0.02
-    risk_adjusted_return: 0.02
+ENABLED_SOURCES:
+  - binance_launchpad
+  - coinlist
+  - polkastarter
+  # ... (39 autres sources)
