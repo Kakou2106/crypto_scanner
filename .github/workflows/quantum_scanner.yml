@@ -27,14 +27,14 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          playwright install chromium
-          playwright install-deps
+          pip install --upgrade pip
+          pip install python-dotenv aiohttp requests beautifulsoup4 lxml python-telegram-bot python-whois loguru web3
       
       - name: Run Scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_REVIEW: ${{ secrets.TELEGRAM_CHAT_REVIEW }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
           INFURA_URL: ${{ secrets.INFURA_URL }}
