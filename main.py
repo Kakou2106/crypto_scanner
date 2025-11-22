@@ -344,7 +344,7 @@ class QuantumScanner:
         
         ratios['market_sentiment'] = 0.55
         
-        vesting = data.get('vesting_months', 0)
+        vesting = data.get('vesting_months')
         ratios['tokenomics_health'] = 1.0 if vesting >= 24 else 0.7 if vesting >= 12 else 0.4
         ratios['vesting_score'] = ratios['tokenomics_health']
         ratios['exchange_listing_score'] = 0.3
