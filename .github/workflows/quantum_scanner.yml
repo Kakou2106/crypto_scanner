@@ -1,56 +1,65 @@
-name: Quantum Scanner
+name: Quantum Scanner 24/7
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   schedule:
     - cron: '0 */6 * * *'  # Toutes les 6 heures
+  workflow_dispatch:  # Déclenchement manuel
 
 jobs:
-  scan:
+  quantum-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: 🛎️ Checkout code
+        uses: actions/checkout@v4
       
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install aiohttp beautifulsoup4 python-dotenv loguru python-telegram-bot
-        
-    - name: Create logs directory
-      run: mkdir -p logs
+      - name: 🐍 Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
       
-    - name: Run Quantum Scanner
-      run: |
-        echo "🎯 Démarrage du scan Quantum..."
-        python main.py --github-actions --once
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_CHAT_REVIEW: ${{ secrets.TELEGRAM_CHAT_REVIEW }}
-        ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-        BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
-        POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
-        INFURA_URL: ${{ secrets.INFURA_URL }}
-        COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
-        GO_SCORE: 70
-        REVIEW_SCORE: 40
-        MAX_MARKET_CAP_EUR: 210000
-        SCAN_INTERVAL_HOURS: 6
-        MAX_PROJECTS_PER_SCAN: 50
-        
-    - name: Upload logs
-      uses: actions/upload-artifact@v4
-      with:
-        name: scanner-logs
-        path: logs/
-        retention-days: 7
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install
+      
+      - name: 🔧 Setup environment
+        run: |
+          cp .env.example .env
+          # Les secrets seront injectés par GitHub
+      
+      - name: 🚀 Run Quantum Scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_REVIEW: ${{ secrets.TELEGRAM_CHAT_REVIEW }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
+          POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
+          INFURA_URL: ${{ secrets.INFURA_URL }}
+          COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
+          GO_SCORE: ${{ vars.GO_SCORE || '70' }}
+          REVIEW_SCORE: ${{ vars.REVIEW_SCORE || '40' }}
+          MAX_MARKET_CAP_EUR: ${{ vars.MAX_MARKET_CAP_EUR || '210000' }}
+        run: python main.py --github-actions --once
+      
+      - name: 📊 Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantum-scan-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            results/*.json
+            logs/*.log
+            quantum.db
+          retention-days: 30
+      
+      - name: 📨 Notify on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: '🚨 Quantum Scanner failed! Check GitHub Actions.'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
