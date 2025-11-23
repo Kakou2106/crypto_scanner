@@ -14,15 +14,37 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from dotenv import load_dotenv
-from telegram import Bot
 from bs4 import BeautifulSoup
-from web3 import Web3
-import whois
 from urllib.parse import urlparse
 import traceback
 import argparse
 
+# Import conditionnel pour éviter les erreurs
+try:
+    from telegram import Bot
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    logger.warning("Telegram non disponible")
+
+try:
+    from web3 import Web3
+    WEB3_AVAILABLE = True
+except ImportError:
+    WEB3_AVAILABLE = False
+    logger.warning("Web3 non disponible")
+
+try:
+    import whois
+    WHOIS_AVAILABLE = True
+except ImportError:
+    WHOIS_AVAILABLE = False
+    logger.warning("Whois non disponible")
+
 load_dotenv()
+
+# Configuration des logs
+os.makedirs("logs", exist_ok=True)
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days", compression="zip")
 
 # ============================================================================
@@ -62,10 +84,12 @@ class QuantumScanner:
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.chat_review = os.getenv('TELEGRAM_CHAT_REVIEW')
-        if self.telegram_token:
+        
+        if self.telegram_token and TELEGRAM_AVAILABLE:
             self.telegram_bot = Bot(token=self.telegram_token)
         else:
             self.telegram_bot = None
+            logger.warning("❌ Telegram bot non configuré")
         
         self.go_score = float(os.getenv('GO_SCORE', 60))
         self.review_score = float(os.getenv('REVIEW_SCORE', 40))
@@ -76,10 +100,14 @@ class QuantumScanner:
         self.http_timeout = int(os.getenv('HTTP_TIMEOUT', 30))
         self.api_delay = float(os.getenv('API_DELAY', 1.0))
         
-        try:
-            self.w3_eth = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/6076aef5ef3344979320210486f4eeee')))
-            self.w3_bsc = Web3(Web3.HTTPProvider('https://bsc-dataseed.binance.org/'))
-        except:
+        if WEB3_AVAILABLE:
+            try:
+                self.w3_eth = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/6076aef5ef3344979320210486f4eeee')))
+                self.w3_bsc = Web3(Web3.HTTPProvider('https://bsc-dataseed.binance.org/'))
+            except:
+                self.w3_eth = None
+                self.w3_bsc = None
+        else:
             self.w3_eth = None
             self.w3_bsc = None
         
