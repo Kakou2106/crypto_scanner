@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-QUANTUM SCANNER v16.3 - VRAIES DONNÉES CORRECTES
-Scrape RÉELLEMENT les projets + Détection automatique FAKES
+QUANTUM SCANNER v16.3 - Point d'entrée principal
+Scanner Crypto avec détection FAKES et données RÉELLES
 """
 
 import asyncio
@@ -20,6 +20,7 @@ from web3 import Web3
 import whois
 from urllib.parse import urlparse
 import traceback
+import argparse
 
 load_dotenv()
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days", compression="zip")
@@ -61,7 +62,10 @@ class QuantumScanner:
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.chat_review = os.getenv('TELEGRAM_CHAT_REVIEW')
-        self.telegram_bot = Bot(token=self.telegram_token)
+        if self.telegram_token:
+            self.telegram_bot = Bot(token=self.telegram_token)
+        else:
+            self.telegram_bot = None
         
         self.go_score = float(os.getenv('GO_SCORE', 60))
         self.review_score = float(os.getenv('REVIEW_SCORE', 40))
@@ -756,6 +760,10 @@ class QuantumScanner:
     async def send_telegram_complete(self, project: Dict, result: Dict):
         """Envoi Telegram avec données SPÉCIFIQUES"""
         
+        if not self.telegram_bot:
+            logger.warning("❌ Telegram bot non configuré")
+            return
+        
         if result.get('is_fake'):
             msg = f"""
 🚫 **FAKE PROJET DÉTECTÉ**
@@ -994,32 +1002,33 @@ _Automatiquement rejeté_
 
 
 # ============================================================================
-# MAIN
+# MAIN CORRIGÉ
 # ============================================================================
 
-async def main(args):
-    """Main"""
-    scanner = QuantumScanner()
-    
-    if args.once:
-        logger.info("Mode: Scan unique")
-        await scanner.scan()
-    elif args.daemon:
-        logger.info(f"Mode: Daemon {scanner.scan_interval}h")
-        while True:
-            await scanner.scan()
-            logger.info(f"⏸️ Pause {scanner.scan_interval}h...")
-            await asyncio.sleep(scanner.scan_interval * 3600)
-    else:
-        logger.error("❌ Utilisez --once ou --daemon")
-
-
-if __name__ == "__main__":
-    import argparse
-    
+async def main():
+    """Main corrigé avec tous les arguments"""
     parser = argparse.ArgumentParser(description='Quantum Scanner v16.3')
     parser.add_argument('--once', action='store_true', help='Scan unique')
     parser.add_argument('--daemon', action='store_true', help='Mode 24/7')
+    parser.add_argument('--github-actions', action='store_true', help='Mode GitHub Actions')
+    parser.add_argument('--verbose', action='store_true', help='Mode verbeux')
     
     args = parser.parse_args()
-    asyncio.run(main(args))
+    
+    scanner = QuantumScanner()
+    
+    if args.github_actions or args.once:
+        print("🚀 Mode GitHub Actions - Scan unique")
+        await scanner.scan()
+    elif args.daemon:
+        print(f"🔁 Mode Daemon - Scan toutes les {scanner.scan_interval}h")
+        while True:
+            await scanner.scan()
+            print(f"⏸️ Pause {scanner.scan_interval}h...")
+            await asyncio.sleep(scanner.scan_interval * 3600)
+    else:
+        print("❌ Utilisez --once, --daemon ou --github-actions")
+        parser.print_help()
+
+if __name__ == "__main__":
+    asyncio.run(main())
