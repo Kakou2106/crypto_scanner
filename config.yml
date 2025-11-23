@@ -1,7 +1,7 @@
 # Quantum Scanner v6.0 - Configuration
 scanner:
-  go_score: 70
-  review_score: 40
+  go_score: 60
+  review_score: 30
   max_market_cap_eur: 210000
   scan_interval_hours: 6
   max_projects_per_scan: 50
@@ -14,23 +14,23 @@ launchpads:
       url: "https://launchpad.binance.com/en/api/projects"
       enabled: true
       priority: 10
-    
+
     - name: "CoinList"
       url: "https://coinlist.co/api/v1/token_sales"
       enabled: true
       priority: 9
       requires_auth: true
-    
+
     - name: "Polkastarter"
       url: "https://api.polkastarter.com/graphql"
       enabled: true
       priority: 8
-    
+
     - name: "TrustPad"
       url: "https://trustpad.io/api/projects"
       enabled: true
       priority: 7
-    
+
     - name: "Seedify"
       url: "https://launchpad.seedify.fund/api/idos"
       enabled: true
@@ -41,22 +41,22 @@ launchpads:
       url: "https://redkite.polkafoundry.com/api/projects"
       enabled: true
       priority: 6
-    
+
     - name: "BSCStation"
       url: "https://bscstation.finance/api/pools"
       enabled: true
       priority: 5
-    
+
     - name: "DAO Maker"
       url: "https://daolauncher.com/api/shos"
       enabled: true
       priority: 5
-    
+
     - name: "DuckSTARTER"
       url: "https://duckstarter.io/api/projects"
       enabled: true
       priority: 4
-    
+
     - name: "GameFi"
       url: "https://gamefi.org/api/idos"
       enabled: true
@@ -67,22 +67,22 @@ launchpads:
       url: "https://dx.app/api/locks"
       enabled: true
       priority: 3
-    
+
     - name: "Team.Finance Locks"
       url: "https://www.team.finance/api/locks"
       enabled: true
       priority: 3
-    
+
     - name: "UNCX Locks"
       url: "https://uncx.network/api/locks"
       enabled: true
       priority: 2
-    
+
     - name: "Enjinstarter"
       url: "https://enjinstarter.com/api/idos"
       enabled: true
-      priority: 2
-    
+      priority: 如此一来2
+
     - name: "PAID Network"
       url: "https://ignition.paid.network/api/idos"
       enabled: true
@@ -93,19 +93,19 @@ antiscam:
     - name: "CryptoScamDB"
       url: "https://api.cryptoscamdb.org/v1/check"
       enabled: true
-    
+
     - name: "Chainabuse"
       url: "https://www.chainabuse.com/api/reports/address"
       enabled: true
-    
+
     - name: "MetaMask Phishing"
       url: "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json"
       enabled: true
-    
+
     - name: "TokenSniffer"
       url: "https://api.tokensniffer.com/v2/tokens"
       enabled: true
-    
+
     - name: "Honeypot.is"
       url: "https://api.honeypot.is/v1/GetHoneypotStatus"
       enabled: true
@@ -122,24 +122,10 @@ notifications:
     accept_channel: "main"
     review_channel: "review"
     format: "detailed"
-  
+
   formats:
-    accept: |
-      🌌 QUANTUM SCANNER - PROJET ACCEPTÉ
-      
-      🚀 {name} ({symbol})
-      📊 Score: {score}/100
-      💰 MC: {market_cap}€
-      
-      🔗 {link}
-    
-    review: |
-      ⚠️ QUANTUM SCANNER - REVUE REQUISE
-      
-      🚀 {name} ({symbol})  
-      📊 Score: {score}/100
-      
-      🔗 {link}
+    accept: "QUANTUM SCANNER - PROJET ACCEPTE\n\n{name} ({symbol})\nScore: {score}/100\nMC: {market_cap}€\n\n{link}"
+    review: "QUANTUM SCANNER - REVUE REQUISE\n\n{name} ({symbol})\nScore: {score}/100\n\n{link}"
 
 database:
   path: "quantum.db"
