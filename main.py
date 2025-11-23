@@ -1,424 +1,496 @@
 #!/usr/bin/env python3
 """
-QUANTUM SCANNER v6.0 - CODE URGENCE FONCTIONNEL
+╔═══════════════════════════════════════════════════════════════════════════╗
+║           QUANTUM SCANNER v20.0 - FICHIER PRINCIPAL CONSOLIDÉ            ║
+║    Scanner asynchrone multi-source, DB complète, anti-scam intégré        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
 import asyncio
 import aiohttp
-import aiosqlite
 import sqlite3
 import os
-import json
-import argparse
-import time
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
-from enum import Enum
-from pathlib import Path
+from loguru import logger
 from dotenv import load_dotenv
+from typing import Dict, List
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# Import conditionnel des modules anti-scam et ratios (assurer qu'ils sont dans le PYTHONPATH)
+try:
+    from antiscam import QuantumAntiScam
+except ImportError:
+    QuantumAntiScam = None
+    logger.warning("Module 'antiscam' non trouvé, les vérifications anti-scam seront désactivées")
 
-@dataclass
-class ScannerConfig:
-    telegram_bot_token: str = ""
-    telegram_chat_id: str = ""
-    telegram_chat_review: str = ""
-    go_score: float = 70.0
-    review_score: float = 40.0
-    max_market_cap_eur: float = 210000.0
-    scan_interval_hours: int = 6
-    max_projects_per_scan: int = 50
+try:
+    from financial_ratios import FinancialRatios
+except ImportError:
+    FinancialRatios = None
+    logger.warning("Module 'financial_ratios' non trouvé, les calculs de ratios seront désactivés")
 
-class Verdict(Enum):
-    ACCEPT = "ACCEPT"
-    REVIEW = "REVIEW" 
-    REJECT = "REJECT"
+# Import Telegram bot
+try:
+    from telegram import Bot
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    logger.warning("Telegram non disponible")
 
-@dataclass
-class Project:
-    name: str
-    symbol: str
-    source: str
-    link: str
-    website: Optional[str] = None
-    twitter: Optional[str] = None
-    telegram: Optional[str] = None
-    github: Optional[str] = None
-    contract_address: Optional[str] = None
-    chain: Optional[str] = None
+load_dotenv()
 
-@dataclass
-class AnalysisResult:
-    project: Project
-    verdict: Verdict
-    score: float
-    reason: str
-    ratios: Dict[str, float]
-    scam_checks: Dict[str, Any]
-    project_data: Dict[str, Any]
-    estimated_mc_eur: float
-    risk_level: str
 
-# ============================================================================
-# TELEGRAM NOTIFICATIONS
-# ============================================================================
+class QuantumConfig:
+    LAUNCHPADS = {
+        "binance": "https://launchpad.binance.com/en/api/projects",
+        "coinlist": "https://coinlist.co/api/v1/token_sales",
+        "seedify": "https://launchpad.seedify.fund/api/idos",
+    }
+    TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+    TELEGRAM_CHAT_REVIEW = os.getenv('TELEGRAM_CHAT_REVIEW')
+    GO_SCORE = float(os.getenv('GO_SCORE', 70.0))
+    REVIEW_SCORE = float(os.getenv('REVIEW_SCORE', 40.0))
 
-class TelegramNotifier:
-    def __init__(self, config: ScannerConfig):
-        self.config = config
-    
-    async def send_project_alert(self, project: Project, analysis: AnalysisResult):
+
+class QuantumScanner:
+    def __init__(self):
+        logger.info("🌌 Initialisation Quantum Scanner consolidé")
+        self.telegram_bot = Bot(token=QuantumConfig.TELEGRAM_TOKEN) if TELEGRAM_AVAILABLE and QuantumConfig.TELEGRAM_TOKEN else None
+        if self.telegram_bot:
+            logger.info("✅ Telegram bot initialisé")
+        else:
+            logger.warning("⚠️ Telegram bot non initialisé")
+
+        self.anti_scam = QuantumAntiScam() if QuantumAntiScam else None
+        self.ratios_calculator = FinancialRatios() if FinancialRatios else None
+
+        self.init_db()
+
+        self.stats = {
+            "projects_found": 0,
+            "accepted": 0,
+            "review": 0,
+            "rejected": 0,
+            "alerts_sent": 0,
+            "scam_detected": 0,
+        }
+
+    def init_db(self):
+        os.makedirs("logs", exist_ok=True)
+        conn = sqlite3.connect("quantum.db")
+        c = conn.cursor()
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                symbol TEXT,
+                source TEXT,
+                link TEXT,
+                contract_address TEXT,
+                verdict TEXT,
+                score REAL,
+                reason TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS ratios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                mc_fdmc REAL,
+                circ_vs_total REAL,
+                volume_mc REAL,
+                liquidity_ratio REAL,
+                whale_concentration REAL,
+                audit_score REAL,
+                vc_score REAL,
+                social_sentiment REAL,
+                dev_activity REAL,
+                market_sentiment REAL,
+                tokenomics_health REAL,
+                vesting_score REAL,
+                exchange_listing_score REAL,
+                community_growth REAL,
+                partnership_quality REAL,
+                product_maturity REAL,
+                revenue_generation REAL,
+                volatility REAL,
+                correlation REAL,
+                historical_performance REAL,
+                risk_adjusted_return REAL,
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            )
+        """)
+
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS scan_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_start DATETIME,
+                scan_end DATETIME,
+                projects_found INTEGER,
+                projects_accepted INTEGER,
+                projects_review INTEGER,
+                projects_rejected INTEGER,
+                alerts_sent INTEGER,
+                scam_detected INTEGER,
+                errors TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        if self.anti_scam:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS scam_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    address TEXT UNIQUE,
+                    check_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    is_scam INTEGER
+                )
+            """)
+
+        conn.commit()
+        conn.close()
+        logger.info("✅ Base de données initialisée")
+
+    async def fetch_projects_from_binance(self) -> List[Dict]:
+        url = QuantumConfig.LAUNCHPADS['binance']
+        projects = []
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for item in data.get('data', []):
+                            projects.append({
+                                "name": item.get('projectName', 'Unknown'),
+                                "symbol": item.get('symbol', None),
+                                "source": "binance",
+                                "link": item.get('launchpadUrl', ''),
+                                "contract_address": item.get('contractAddress', None),
+                            })
+            except Exception as e:
+                logger.error(f"Erreur fetch Binance : {e}")
+        return projects
+
+    async def fetch_projects_from_coinlist(self) -> List[Dict]:
+        url = QuantumConfig.LAUNCHPADS['coinlist']
+        projects = []
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for item in data.get('token_sales', []):
+                            projects.append({
+                                "name": item.get('name', 'Unknown'),
+                                "symbol": item.get('ticker', None),
+                                "source": "coinlist",
+                                "link": item.get('url', ''),
+                                "contract_address": item.get('contractAddress', None),
+                            })
+            except Exception as e:
+                logger.error(f"Erreur fetch CoinList : {e}")
+        return projects
+
+    async def fetch_projects_from_seedify(self) -> List[Dict]:
+        url = QuantumConfig.LAUNCHPADS['seedify']
+        projects = []
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for item in data.get('data', []):
+                            projects.append({
+                                "name": item.get('name', 'Unknown'),
+                                "symbol": item.get('symbol', None),
+                                "source": "seedify",
+                                "link": item.get('websiteUrl', ''),
+                                "contract_address": item.get('contractAddress', None),
+                            })
+            except Exception as e:
+                logger.error(f"Erreur fetch Seedify : {e}")
+        return projects
+
+    async def fetch_all_projects(self) -> List[Dict]:
+        all_projects = []
+        all_projects.extend(await self.fetch_projects_from_binance())
+        all_projects.extend(await self.fetch_projects_from_coinlist())
+        all_projects.extend(await self.fetch_projects_from_seedify())
+
+        seen = set()
+        unique_projects = []
+        for proj in all_projects:
+            key = proj.get('symbol') or proj.get('name')
+            if key and key not in seen:
+                seen.add(key)
+                unique_projects.append(proj)
+        logger.info(f"📊 {len(unique_projects)} projets uniques récupérés")
+        return unique_projects
+
+    async def analyze_project(self, project: Dict) -> Dict:
+        scam_checks = {}
+        if self.anti_scam and project.get('contract_address'):
+            scam_checks = await self.anti_scam.comprehensive_scan(project)
+            if scam_checks.get('is_scam', False):
+                self.stats['scam_detected'] += 1
+                return {
+                    "verdict": "REJECT",
+                    "score": 0,
+                    "reason": "🚨 Scam détecté par anti-scam",
+                    "ratios": {},
+                    "scam_checks": scam_checks,
+                    "project_data": project
+                }
+
+        project_data = project.copy()  # ici normalement enrichir avec API/tokenomics etc.
+
+        if self.ratios_calculator:
+            ratios = self.ratios_calculator.calculate_all_ratios(project_data, scam_checks)
+        else:
+            ratios = {}
+
+        # Exemple de score final pondéré
+        weights = {
+            'mc_fdmc': 0.15, 'circ_vs_total': 0.08, 'volume_mc': 0.07, 'liquidity_ratio': 0.12,
+            'whale_concentration': 0.10, 'audit_score': 0.10, 'vc_score': 0.08, 'social_sentiment': 0.05,
+            'dev_activity': 0.06, 'market_sentiment': 0.03, 'tokenomics_health': 0.04, 'vesting_score': 0.03,
+            'exchange_listing_score': 0.02, 'community_growth': 0.04, 'partnership_quality': 0.02,
+            'product_maturity': 0.03, 'revenue_generation': 0.02, 'volatility': 0.02, 'correlation': 0.01,
+            'historical_performance': 0.02, 'risk_adjusted_return': 0.01,
+        }
+
+        final_score = 0
+        for key, weight in weights.items():
+            final_score += ratios.get(key, 0) * weight
+        final_score *= 100
+
+        if final_score >= QuantumConfig.GO_SCORE:
+            verdict = "ACCEPT"
+            reason = f"✅ Score final excellent: {final_score:.1f}"
+        elif final_score >= QuantumConfig.REVIEW_SCORE:
+            verdict = "REVIEW"
+            reason = f"⚠️ Score modéré: {final_score:.1f}"
+        else:
+            verdict = "REJECT"
+            reason = f"❌ Score insuffisant: {final_score:.1f}"
+
+        return {
+            "verdict": verdict,
+            "score": final_score,
+            "reason": reason,
+            "ratios": ratios,
+            "scam_checks": scam_checks,
+            "project_data": project_data
+        }
+
+    async def send_telegram_alert(self, project: Dict, analysis: Dict):
+        if not self.telegram_bot:
+            logger.warning("⚠️ Telegram bot non disponible, alerte non envoyée")
+            return
+
+        if analysis['verdict'] == 'ACCEPT':
+            chat_id = QuantumConfig.TELEGRAM_CHAT_ID
+        elif analysis['verdict'] == 'REVIEW':
+            chat_id = QuantumConfig.TELEGRAM_CHAT_REVIEW
+        else:
+            # Pas d'alertes pour rejet
+            return
+
+        if not chat_id:
+            logger.warning("⚠️ Chat Telegram non configuré, alerte non envoyée")
+            return
+
+        verdict_emoji = {"ACCEPT": "✅", "REVIEW": "⚠️", "REJECT": "❌"}.get(analysis['verdict'], "ℹ️")
+
+        top_ratios_text = "\n".join(
+            f"• {k.replace('_', ' ').capitalize()}: {v*100:.1f}%" for k, v in
+            sorted(analysis.get('ratios', {}).items(), key=lambda x: x[1], reverse=True)[:5])
+
+        message = (
+            f"🌌 *Quantum Scanner v20*\n\n"
+            f"🚀 *{project.get('name', 'N/A')}* ({project.get('symbol', 'N/A')})\n"
+            f"📊 *Score*: {analysis['score']:.1f} {verdict_emoji} *{analysis['verdict']}*\n\n"
+            f"🔒 *Sécurité anti-scam*: {analysis.get('scam_checks', {}).get('is_scam', False)}\n\n"
+            f"📈 *Top 5 ratios:*\n{top_ratios_text}\n\n"
+            f"📝 *Analyse:* {analysis['reason']}\n"
+            f"🔗 Source: {project.get('source', 'Inconnue')}\n"
+            f"⚠️ _Risque élevé, DYOR_\n"
+            f"_Scan ID: {datetime.utcnow().strftime('%Y%m%d_%H%M%SUTC')}_"
+        )
+
         try:
-            from telegram import Bot
-            bot = Bot(token=self.config.telegram_bot_token)
-            
-            message = self._format_project_message(project, analysis)
-            
-            if analysis.verdict == Verdict.ACCEPT:
-                chat_id = self.config.telegram_chat_id
-            else:
-                chat_id = self.config.telegram_chat_review or self.config.telegram_chat_id
-            
-            await bot.send_message(
+            await self.telegram_bot.send_message(
                 chat_id=chat_id,
                 text=message,
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
-            
-            print(f"✅ Alerte Telegram envoyée: {project.name}")
-            return True
-            
+            logger.info(f"✅ Alerte Telegram envoyée pour {project.get('name')}")
+            self.stats['alerts_sent'] += 1
         except Exception as e:
-            print(f"❌ Erreur Telegram: {e}")
-            return False
-    
-    def _format_project_message(self, project: Project, analysis: AnalysisResult) -> str:
-        # Top 5 ratios
-        top_ratios = sorted(analysis.ratios.items(), key=lambda x: x[1], reverse=True)[:5]
-        ratios_text = "\n".join([f"{i+1}. {k}: {v:.1%}" for i, (k, v) in enumerate(top_ratios)])
-        
-        # Données projet
-        data = analysis.project_data
-        
-        return f"""🌌 **QUANTUM SCAN — {project.name} ({project.symbol})**
+            logger.error(f"❌ Erreur envoi Telegram: {e}")
 
-📊 **SCORE: {analysis.score:.1f}/100** | 🎯 **VERDICT: {analysis.verdict.value}** | ⚡ **RISQUE: {analysis.risk_level}**
-
-🚀 **SOURCE: {project.source}**
-⛓️ **CHAIN: {project.chain or 'N/A'}**
-
----
-
-💰 **FINANCIERS**
-• Hard Cap: {data.get('hard_cap', 0):,.0f}€
-• Prix: ${data.get('ico_price', 0):.4f}
-• MC Estimé: {analysis.estimated_mc_eur:,.0f}€
-
----
-
-🎯 **TOP 5 RATIOS**
-{ratios_text}
-
----
-
-📊 **SÉCURITÉ**
-• Audit: {'✅' if data.get('audit_firms') else '❌'}
-• Contract: {'✅' if project.contract_address else '❌'}
-• Score Sécurité: {analysis.scam_checks.get('security_score', 0)}/100
-
----
-
-📱 **SOCIALS**
-• Twitter: {data.get('twitter_followers', 0):,}
-• Telegram: {data.get('telegram_members', 0):,}
-• GitHub: {data.get('github_commits', 0)} commits
-
----
-
-⚠️ **RED FLAGS: {len(analysis.scam_checks.get('flags', [])) or 'Aucun ✅'}**
-
----
-
-🔗 **LIENS**
-[Site]({project.website or '#'}) | [Launchpad]({project.link})
-
----
-
-_ID: {int(time.time())} | {datetime.now().strftime('%Y-%m-%d %H:%M')}_
-"""
-
-# ============================================================================
-# LAUNCHPAD FETCHERS
-# ============================================================================
-
-class LaunchpadFetcher:
-    def __init__(self, config: ScannerConfig):
-        self.config = config
-    
-    async def fetch_all_projects(self) -> List[Project]:
-        all_projects = []
-        
-        # Binance Launchpad
+    def save_to_db(self, project: Dict, analysis: Dict):
         try:
-            url = "https://launchpad.binance.com/en/api/projects"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        for item in data.get('data', []):
-                            project = Project(
-                                name=item.get('title', 'Unknown'),
-                                symbol=item.get('symbol', ''),
-                                source="Binance Launchpad",
-                                link=f"https://launchpad.binance.com/en/subscription/{item.get('id', '')}",
-                                website=item.get('website', ''),
-                                chain="BSC"
-                            )
-                            all_projects.append(project)
-                        print(f"✅ Binance: {len(all_projects)} projets")
+            conn = sqlite3.connect("quantum.db")
+            c = conn.cursor()
+
+            c.execute("""
+                INSERT OR REPLACE INTO projects 
+                (name, symbol, source, link, contract_address, verdict, score, reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project.get('name'),
+                project.get('symbol'),
+                project.get('source'),
+                project.get('link'),
+                project.get('contract_address'),
+                analysis.get('verdict'),
+                analysis.get('score'),
+                analysis.get('reason'),
+            ))
+            project_id = c.lastrowid
+
+            ratios = analysis.get('ratios', {})
+            c.execute("""
+                INSERT INTO ratios (
+                    project_id, mc_fdmc, circ_vs_total, volume_mc, liquidity_ratio,
+                    whale_concentration, audit_score, vc_score, social_sentiment,
+                    dev_activity, market_sentiment, tokenomics_health, vesting_score,
+                    exchange_listing_score, community_growth, partnership_quality,
+                    product_maturity, revenue_generation, volatility, correlation,
+                    historical_performance, risk_adjusted_return
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                project_id,
+                ratios.get('mc_fdmc'),
+                ratios.get('circ_vs_total'),
+                ratios.get('volume_mc'),
+                ratios.get('liquidity_ratio'),
+                ratios.get('whale_concentration'),
+                ratios.get('audit_score'),
+                ratios.get('vc_score'),
+                ratios.get('social_sentiment'),
+                ratios.get('dev_activity'),
+                ratios.get('market_sentiment'),
+                ratios.get('tokenomics_health'),
+                ratios.get('vesting_score'),
+                ratios.get('exchange_listing_score'),
+                ratios.get('community_growth'),
+                ratios.get('partnership_quality'),
+                ratios.get('product_maturity'),
+                ratios.get('revenue_generation'),
+                ratios.get('volatility'),
+                ratios.get('correlation'),
+                ratios.get('historical_performance'),
+                ratios.get('risk_adjusted_return'),
+            ))
+
+            conn.commit()
+            conn.close()
+            logger.debug(f"✅ Données sauvegardées pour {project.get('name')}")
         except Exception as e:
-            print(f"❌ Binance error: {e}")
-        
-        # TrustPad
+            logger.error(f"❌ Erreur sauvegarde base : {e}")
+
+    def save_scan_history(self, start_time: datetime, end_time: datetime):
         try:
-            url = "https://trustpad.io/api/projects"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        for item in data[:3]:  # Limiter à 3
-                            project = Project(
-                                name=item.get('name', 'Unknown'),
-                                symbol=item.get('symbol', ''),
-                                source="TrustPad", 
-                                link=f"https://trustpad.io/projects/{item.get('id', '')}",
-                                chain="BSC"
-                            )
-                            all_projects.append(project)
-                        print(f"✅ TrustPad: {len([p for p in all_projects if p.source == 'TrustPad'])} projets")
+            conn = sqlite3.connect("quantum.db")
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO scan_history (
+                    scan_start, scan_end, projects_found, projects_accepted,
+                    projects_review, projects_rejected, alerts_sent, scam_detected, errors
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                start_time, end_time,
+                self.stats['projects_found'],
+                self.stats['accepted'],
+                self.stats['review'],
+                self.stats['rejected'],
+                self.stats['alerts_sent'],
+                self.stats['scam_detected'],
+                None
+            ))
+            conn.commit()
+            conn.close()
+            logger.info("✅ Historique du scan sauvegardé")
         except Exception as e:
-            print(f"❌ TrustPad error: {e}")
-        
-        # Si pas de projets, créer des projets de test
-        if not all_projects:
-            print("⚠️  Aucun projet trouvé, création de projets de test")
-            all_projects = [
-                Project(name="QuantumTest1", symbol="QT1", source="Test", link="https://example.com", chain="BSC"),
-                Project(name="QuantumTest2", symbol="QT2", source="Test", link="https://example.com", chain="ETH"),
-            ]
-        
-        return all_projects[:self.config.max_projects_per_scan]
+            logger.error(f"❌ Erreur sauvegarde historique: {e}")
 
-# ============================================================================
-# ANTI-SCAM ENGINE
-# ============================================================================
-
-class AntiScamEngine:
-    def __init__(self, config: ScannerConfig):
-        self.config = config
-    
-    async def comprehensive_scan(self, project: Project) -> Dict[str, Any]:
-        flags = []
-        security_score = 100
-        
-        # Vérifications basiques
-        if not project.website:
-            flags.append("Pas de site web")
-            security_score -= 20
-        
-        if not project.contract_address:
-            flags.append("Pas de contract")
-            security_score -= 10
-        
-        security_score = max(0, security_score)
-        
-        return {
-            'is_suspicious': security_score < 60,
-            'security_score': security_score,
-            'flags': flags
-        }
-
-# ============================================================================
-# FINANCIAL RATIOS
-# ============================================================================
-
-class FinancialRatiosCalculator:
-    def calculate_all_ratios(self, project_data: Dict, scam_checks: Dict) -> Dict[str, float]:
-        # Ratios simplifiés mais réalistes
-        return {
-            'mc_fdmc': 0.7,
-            'volume_mc': 0.5,
-            'liquidity_ratio': 0.6,
-            'audit_score': 0.8 if project_data.get('audit_firms') else 0.3,
-            'vc_score': 0.9 if project_data.get('backers') else 0.4,
-            'social_sentiment': 0.6,
-            'dev_activity': 0.5,
-            'tokenomics_health': 0.7,
-            'whale_concentration': 0.6,
-            'product_maturity': 0.8
-        }
-    
-    def calculate_final_score(self, ratios: Dict[str, float]) -> float:
-        return sum(ratios.values()) / len(ratios) * 100
-
-# ============================================================================
-# SCANNER PRINCIPAL
-# ============================================================================
-
-class QuantumScanner:
-    def __init__(self, config: ScannerConfig):
-        self.config = config
-        self.telegram = TelegramNotifier(config)
-        self.launchpads = LaunchpadFetcher(config)
-        self.antiscam = AntiScamEngine(config)
-        self.ratios_calc = FinancialRatiosCalculator()
-        
-        self.stats = {
-            'found': 0,
-            'accepted': 0,
-            'rejected': 0,
-            'review': 0,
-            'alerts': 0
-        }
-    
     async def run_scan(self):
-        print("🚀 DÉMARRAGE SCAN QUANTUM v6.0")
-        
-        # Récupération projets
-        projects = await self.launchpads.fetch_all_projects()
-        self.stats['found'] = len(projects)
-        
-        print(f"📊 {len(projects)} projets à analyser")
-        
-        for project in projects:
-            print(f"🔍 Analyse {project.name}...")
-            
-            try:
-                analysis = await self._analyze_project(project)
-                
-                # Envoi alerte
-                if analysis.verdict in [Verdict.ACCEPT, Verdict.REVIEW]:
-                    alert_sent = await self.telegram.send_project_alert(project, analysis)
-                    if alert_sent:
-                        self.stats['alerts'] += 1
-                
-                # Stats
-                if analysis.verdict == Verdict.ACCEPT:
+        logger.info("🚀 Démarrage du scan complet Quantum Scanner v20.0")
+        start_time = datetime.utcnow()
+
+        try:
+            projects = await self.fetch_all_projects()
+            self.stats['projects_found'] = len(projects)
+
+            if not projects:
+                logger.warning("⚠️ Aucun projet trouvé")
+                return
+
+            for i, project in enumerate(projects, start=1):
+                logger.info(f"📊 {i}/{len(projects)} Analyse projet : {project.get('name')}")
+                analysis = await self.analyze_project(project)
+                self.save_to_db(project, analysis)
+                if analysis['verdict'] in ['ACCEPT', 'REVIEW']:
+                    await self.send_telegram_alert(project, analysis)
+
+                verdict = analysis['verdict']
+                if verdict == 'ACCEPT':
                     self.stats['accepted'] += 1
-                elif analysis.verdict == Verdict.REVIEW:
+                elif verdict == 'REVIEW':
                     self.stats['review'] += 1
                 else:
                     self.stats['rejected'] += 1
-                    
-            except Exception as e:
-                print(f"❌ Erreur {project.name}: {e}")
-        
-        # Rapport
-        print(f"""
-✅ SCAN TERMINÉ
-📊 Projets: {self.stats['found']}
-✅ Acceptés: {self.stats['accepted']}
-⚠️  Review: {self.stats['review']}
-❌ Rejetés: {self.stats['rejected']}
-📨 Alertes: {self.stats['alerts']}
-        """)
-    
-    async def _analyze_project(self, project: Project) -> AnalysisResult:
-        # Scan anti-scam
-        scam_checks = await self.antiscam.comprehensive_scan(project)
-        
-        # Données projet
-        project_data = self._generate_project_data(project)
-        
-        # Calcul ratios et score
-        ratios = self.ratios_calc.calculate_all_ratios(project_data, scam_checks)
-        score = self.ratios_calc.calculate_final_score(ratios)
-        
-        # Décision
-        verdict, reason, risk = self._determine_verdict(score, scam_checks)
-        
-        return AnalysisResult(
-            project=project,
-            verdict=verdict,
-            score=score,
-            reason=reason,
-            ratios=ratios,
-            scam_checks=scam_checks,
-            project_data=project_data,
-            estimated_mc_eur=project_data.get('current_mc', 50000),
-            risk_level=risk
-        )
-    
-    def _generate_project_data(self, project: Project) -> Dict[str, Any]:
-        return {
-            'current_mc': 50000,
-            'hard_cap': 100000,
-            'ico_price': 0.05,
-            'audit_firms': ['CertiK'] if 'Binance' in project.source else [],
-            'backers': ['Binance Labs'] if 'Binance' in project.source else [],
-            'twitter_followers': 10000,
-            'telegram_members': 5000,
-            'github_commits': 50
-        }
-    
-    def _determine_verdict(self, score: float, scam_checks: Dict) -> Tuple[Verdict, str, str]:
-        if scam_checks['is_suspicious']:
-            return Verdict.REJECT, "Sécurité faible", "ÉLEVÉ"
-        elif score >= self.config.go_score:
-            return Verdict.ACCEPT, "Score excellent", "FAIBLE"
-        elif score >= self.config.review_score:
-            return Verdict.REVIEW, "Score modéré", "MOYEN"
-        else:
-            return Verdict.REJECT, "Score insuffisant", "ÉLEVÉ"
 
-# ============================================================================
-# FONCTION PRINCIPALE
-# ============================================================================
+                await asyncio.sleep(1)  # Rate limiting
 
-def load_config() -> ScannerConfig:
-    load_dotenv()
-    return ScannerConfig(
-        telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN', ''),
-        telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID', ''),
-        telegram_chat_review=os.getenv('TELEGRAM_CHAT_REVIEW', ''),
-        go_score=float(os.getenv('GO_SCORE', '70')),
-        review_score=float(os.getenv('REVIEW_SCORE', '40')),
-        max_market_cap_eur=float(os.getenv('MAX_MARKET_CAP_EUR', '210000')),
-        scan_interval_hours=int(os.getenv('SCAN_INTERVAL_HOURS', '6')),
-        max_projects_per_scan=int(os.getenv('MAX_PROJECTS_PER_SCAN', '50'))
-    )
+            end_time = datetime.utcnow()
+            self.save_scan_history(start_time, end_time)
+
+            logger.info(f"""
+╔══════════════════════════════╗
+║          SCAN TERMINÉ         ║
+║ Projets trouvés : {self.stats['projects_found']:>10}     ║
+║ Acceptés      : {self.stats['accepted']:>10}     ║
+║ En review     : {self.stats['review']:>10}     ║
+║ Rejetés      : {self.stats['rejected']:>10}     ║
+║ Alertes envoyées : {self.stats['alerts_sent']:>7} ║
+║ Scams détectés  : {self.stats['scam_detected']:>7} ║
+╚══════════════════════════════╝
+            """)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur critique lors du scan : {e}")
+
 
 async def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--once', action='store_true', help='Scan unique')
-    parser.add_argument('--daemon', action='store_true', help='Mode 24/7')
-    parser.add_argument('--dry-run', action='store_true', help='Test sans envoi')
-    parser.add_argument('--github-actions', action='store_true', help='Mode CI')  # AJOUTÉ !
-    parser.add_argument('--test-project', type=str, help='Test projet unique')
-    parser.add_argument('--verbose', action='store_true', help='Logs détaillés')
-    
-    args = parser.parse_args()
-    
-    config = load_config()
-    
-    if not config.telegram_bot_token:
-        print("❌ TELEGRAM_BOT_TOKEN manquant")
-        return
-    
-    scanner = QuantumScanner(config)
-    
-    if args.daemon:
-        while True:
-            await scanner.run_scan()
-            await asyncio.sleep(config.scan_interval_hours * 3600)
-    else:
-        await scanner.run_scan()
+    scanner = QuantumScanner()
+    await scanner.run_scan()
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logger.remove()
+    logger.add(
+        "logs/quantum_{time:YYYY-MM-DD}.log",
+        rotation="1 day",
+        retention="30 days",
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+    )
+    logger.add(
+        lambda msg: print(msg, flush=True),
+        level="INFO",
+        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>"
+    )
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("🛑 Scan arrêté par l'utilisateur")
+    except Exception as e:
+        logger.error(f"💥 Erreur fatale : {e}")
