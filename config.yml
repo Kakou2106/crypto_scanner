@@ -1,33 +1,29 @@
-scanner:
-  name: "Quantum Scanner v6.0"
-  version: "6.0"
-  mode: "production"
+# Configuration Quantum Scanner - Version Simple
 
 launchpads:
-  - binance
-  - coinlist
-  - polkastarter
-  - trustpad
-  - seedify
-  - redkite
-  - bscstation
-  - paid
-  - duckstarter
-  - daomaker
-  - dxsale
-  - teamfinance
-  - uncx
-  - enjinstarter
-  - gamefi
+  - name: Binance Launchpad
+    url: https://launchpad.binance.com/en/api/projects
+    enabled: true
+    priority: 1
+    
+  - name: TrustPad
+    url: https://trustpad.io/api/projects  
+    enabled: true
+    priority: 2
+    
+  - name: Seedify
+    url: https://launchpad.seedify.fund/api/idos
+    enabled: true
+    priority: 3
 
-thresholds:
-  go_score: 70
-  review_score: 40
-  max_market_cap_eur: 210000
+ratios:
+  weights:
+    mc_fdmc: 0.15
+    liquidity_ratio: 0.12
+    audit_score: 0.10
+    dev_activity: 0.08
+    community_growth: 0.05
+
+security:
   min_domain_age_days: 7
-
-scan:
-  interval_hours: 6
-  max_projects_per_scan: 50
-  retry_attempts: 3
-  timeout_seconds: 30
+  required_socials: 1
