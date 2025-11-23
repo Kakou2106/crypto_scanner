@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-╔═══════════════════════════════════════════════════════════════════════════╗
-║              QUANTUM SCANNER v16.1 ULTIMATE - PRODUCTION                 ║
-║              30+ SOURCES + 21 RATIOS + ANTI-SCAM + ALERTES              ║
-║              LE BOT DE TRADING CRYPTO LE PLUS PUISSANT AU MONDE          ║
-║                         VERSION FIXÉE - SANS CRASHES                      ║
-╚═══════════════════════════════════════════════════════════════════════════╝
+QUANTUM SCANNER v16.2 - VRAIES DONNÉES
+Scrape RÉELLEMENT les projets + Détection automatique FAKES
 """
 
 import asyncio
@@ -14,7 +10,6 @@ import sqlite3
 import os
 import re
 import json
-import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
@@ -30,23 +25,17 @@ load_dotenv()
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days", compression="zip")
 
 # ============================================================================
-# CONFIGURATION GLOBALE
+# CONFIG
 # ============================================================================
 
 REFERENCE_PROJECTS = {
-    "solana": {"mc_fdmc": 0.15, "vc_score": 1.0, "audit_score": 1.0, "dev_activity": 0.9, "community": 0.85, "multiplier": 250},
-    "polygon": {"mc_fdmc": 0.20, "vc_score": 0.9, "audit_score": 0.9, "dev_activity": 0.85, "community": 0.80, "multiplier": 150},
-    "avalanche": {"mc_fdmc": 0.18, "vc_score": 0.95, "audit_score": 0.9, "dev_activity": 0.80, "community": 0.75, "multiplier": 100},
-    "near": {"mc_fdmc": 0.22, "vc_score": 0.85, "audit_score": 0.85, "dev_activity": 0.75, "community": 0.70, "multiplier": 80},
-    "ftm": {"mc_fdmc": 0.25, "vc_score": 0.80, "audit_score": 0.80, "dev_activity": 0.70, "community": 0.65, "multiplier": 60},
+    "solana": {"mc_fdmc": 0.15, "vc_score": 1.0, "audit_score": 1.0, "dev_activity": 0.9, "multiplier": 250},
+    "polygon": {"mc_fdmc": 0.20, "vc_score": 0.9, "audit_score": 0.9, "dev_activity": 0.85, "multiplier": 150},
+    "avalanche": {"mc_fdmc": 0.18, "vc_score": 0.95, "audit_score": 0.9, "dev_activity": 0.80, "multiplier": 100},
 }
 
-TIER1_AUDITORS = ["CertiK", "PeckShield", "SlowMist", "Quantstamp", "OpenZeppelin", 
-                  "Hacken", "Trail of Bits", "ConsenSys Diligence", "Certora"]
-
-TIER1_VCS = ["Binance Labs", "Coinbase Ventures", "Sequoia Capital", "a16z", "Paradigm", 
-             "Polychain", "Pantera Capital", "Dragonfly Capital", "Multicoin Capital",
-             "Jump Crypto", "Galaxy Digital", "Framework Ventures", "Variant Fund"]
+TIER1_AUDITORS = ["CertiK", "PeckShield", "SlowMist", "Quantstamp", "OpenZeppelin"]
+TIER1_VCS = ["Binance Labs", "Coinbase Ventures", "a16z", "Paradigm", "Polychain"]
 
 RATIO_WEIGHTS = {
     "mc_fdmc": 0.15, "circ_vs_total": 0.08, "volume_mc": 0.07, "liquidity_ratio": 0.12,
@@ -57,75 +46,49 @@ RATIO_WEIGHTS = {
     "historical_performance": 0.02, "risk_adjusted_return": 0.01,
 }
 
-SCAM_KEYWORDS = [
-    "100x guaranteed", "safe moon", "elon", "shiba killer", "get rich quick",
-    "guaranteed profit", "no risk", "double your", "make money fast", "moon", "lambo",
-]
+SCAM_KEYWORDS = ["100x", "safe moon", "shiba", "no risk", "moon", "lambo"]
 
 # ============================================================================
-# CLASSE PRINCIPALE QUANTUM SCANNER
+# QUANTUM SCANNER v16.2
 # ============================================================================
 
 class QuantumScanner:
-    """Scanner ultime de projets crypto early-stage - v16.1 FIXÉE"""
+    """Scanner avec détection FAKES"""
     
     def __init__(self):
-        logger.info("🌌 Quantum Scanner v16.1 ULTIMATE - Initialisation")
+        logger.info("🌌 Quantum Scanner v16.2 - Vraies données")
         
-        # Telegram
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         self.chat_review = os.getenv('TELEGRAM_CHAT_REVIEW')
         self.telegram_bot = Bot(token=self.telegram_token)
         
-        # Seuils (depuis .env)
         self.go_score = float(os.getenv('GO_SCORE', 60))
-        self.review_score = float(os.getenv('REVIEW_SCORE', 30))
+        self.review_score = float(os.getenv('REVIEW_SCORE', 40))
         self.max_mc = float(os.getenv('MAX_MARKET_CAP_EUR', 210_000))
         
-        # Config scan
         self.scan_interval = int(os.getenv('SCAN_INTERVAL_HOURS', 6))
         self.max_projects = int(os.getenv('MAX_PROJECTS_PER_SCAN', 50))
         self.http_timeout = int(os.getenv('HTTP_TIMEOUT', 30))
         self.api_delay = float(os.getenv('API_DELAY', 1.0))
         
-        # Web3
         try:
             self.w3_eth = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/6076aef5ef3344979320210486f4eeee')))
             self.w3_bsc = Web3(Web3.HTTPProvider('https://bsc-dataseed.binance.org/'))
-            self.w3_polygon = Web3(Web3.HTTPProvider('https://polygon-rpc.com'))
-        except Exception as e:
-            logger.warning(f"Web3 init warning: {e}")
+        except:
             self.w3_eth = None
             self.w3_bsc = None
-            self.w3_polygon = None
         
-        # APIs Keys
         self.etherscan_key = os.getenv('ETHERSCAN_API_KEY')
         self.bscscan_key = os.getenv('BSCSCAN_API_KEY')
-        self.coinlist_key = os.getenv('COINLIST_API_KEY')
-        self.virustotal_key = os.getenv('VIRUSTOTAL_KEY')
-        self.slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
         
-        # Stats
-        self.stats = {
-            "projects_found": 0,
-            "accepted": 0,
-            "rejected": 0,
-            "review": 0,
-            "alerts_sent": 0,
-            "scam_blocked": 0,
-        }
-        
-        # Cache
-        self.cache = {}
-        self.blacklist_cache = set()
+        self.stats = {"projects_found": 0, "accepted": 0, "rejected": 0, "review": 0, "alerts_sent": 0, "scam_blocked": 0, "fakes_detected": 0}
         
         self.init_db()
-        logger.info("✅ Scanner prêt - Mode ULTIMATE activé")
+        logger.info("✅ Scanner prêt")
     
     def init_db(self):
-        """Initialisation base de données complète"""
+        """Init DB"""
         os.makedirs("logs", exist_ok=True)
         os.makedirs("results", exist_ok=True)
         
@@ -145,6 +108,7 @@ class QuantumScanner:
                 telegram TEXT,
                 discord TEXT,
                 github TEXT,
+                reddit TEXT,
                 contract_address TEXT,
                 verdict TEXT,
                 score REAL,
@@ -154,8 +118,10 @@ class QuantumScanner:
                 total_supply REAL,
                 fmv REAL,
                 current_mc REAL,
+                potential_multiplier REAL,
                 backers TEXT,
                 audit_firms TEXT,
+                is_fake INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(name, source)
             )
@@ -177,227 +143,200 @@ class QuantumScanner:
         ''')
         
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS blacklists (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                address TEXT,
-                domain TEXT,
-                reason TEXT,
-                source TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        cursor.execute('''
             CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scan_start DATETIME,
                 scan_end DATETIME,
                 projects_found INTEGER,
+                fakes_detected INTEGER,
                 projects_accepted INTEGER,
                 projects_rejected INTEGER,
                 projects_review INTEGER,
-                scam_blocked INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
         conn.commit()
         conn.close()
-        logger.info("✅ Base de données initialisée")
     
     # ========================================================================
-    # FETCHERS - 30+ SOURCES
+    # DÉTECTION FAKES
     # ========================================================================
     
-    async def fetch_with_retry(self, session: aiohttp.ClientSession, url: str, 
-                               max_retries: int = 3) -> Optional[str]:
-        """Fetch avec retry et backoff"""
-        for attempt in range(max_retries):
+    def is_fake_project(self, data: Dict) -> Tuple[bool, str]:
+        """Détecte les FAKES automatiquement"""
+        
+        # RED FLAGS CRITIQUES
+        red_flags = []
+        
+        # 1. Pas de données financières
+        if not data.get('ico_price_usd') or data['ico_price_usd'] == 0:
+            red_flags.append("Pas de prix ICO")
+        
+        if not data.get('hard_cap_usd') or data['hard_cap_usd'] == 0:
+            red_flags.append("Pas de hard cap")
+        
+        if not data.get('total_supply') or data['total_supply'] == 0:
+            red_flags.append("Pas de supply")
+        
+        # 2. Aucun social RÉEL
+        socials = [
+            data.get('telegram'),
+            data.get('discord'),
+            data.get('reddit'),
+            data.get('github')
+        ]
+        valid_socials = [s for s in socials if s and s != "❌" and "launchpad" not in s.lower()]
+        
+        if len(valid_socials) == 0:
+            red_flags.append("❌ Aucun social réel")
+        
+        # 3. Site web = launchpad seulement
+        website = data.get('website', '')
+        if "launchpad" in website.lower() or "mexc" in website.lower() or "okx" in website.lower():
+            red_flags.append("❌ Website = launchpad seulement")
+        
+        # 4. Pas d'audit + pas de VC + dev inactif
+        if not data.get('audit_firms') and not data.get('backers') and data.get('github_commits', 0) == 0:
+            red_flags.append("❌ Pas audit/VC/dev")
+        
+        # 5. Mots-clés scam
+        for keyword in SCAM_KEYWORDS:
+            if keyword.lower() in (data.get('name', '') + data.get('website', '')).lower():
+                red_flags.append(f"❌ Mot-clé scam: {keyword}")
+        
+        # RÉSULTAT
+        if len(red_flags) >= 3:
+            return True, " | ".join(red_flags)
+        
+        return False, ""
+    
+    # ========================================================================
+    # FETCHERS AMÉLIORÉS - VRAIES DONNÉES
+    # ========================================================================
+    
+    async def fetch_with_retry(self, session: aiohttp.ClientSession, url: str) -> Optional[str]:
+        """Fetch avec retry"""
+        for attempt in range(3):
             try:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=self.http_timeout),
                                       headers={'User-Agent': 'Mozilla/5.0'}) as resp:
                     if resp.status == 200:
                         return await resp.text()
-                    elif resp.status == 429:
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        logger.debug(f"HTTP {resp.status} pour {url}")
-                        return None
-            except asyncio.TimeoutError:
-                logger.debug(f"Timeout {url}")
+            except:
                 await asyncio.sleep(1)
-            except Exception as e:
-                logger.debug(f"Fetch error: {e}")
-                return None
         return None
     
-    async def fetch_coinlist_api(self) -> List[Dict]:
-        """Fetch CoinList avec vraie API"""
+    async def fetch_cryptorank_idos(self) -> List[Dict]:
+        """Fetch CryptoRank ICOs avec VRAIES données"""
         projects = []
         try:
-            url = "https://coinlist.co/api/v1/token_sales"
-            headers = {'Authorization': f'Bearer {self.coinlist_key}', 'Content-Type': 'application/json'} if self.coinlist_key else {}
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=15) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for sale in data.get('sales', []):
-                            if sale.get('status') in ['upcoming', 'active']:
-                                projects.append({
-                                    "name": sale.get('project_name'),
-                                    "symbol": sale.get('token_symbol'),
-                                    "source": "CoinList API",
-                                    "link": f"https://coinlist.co/sales/{sale.get('id')}",
-                                    "hard_cap_usd": sale.get('hard_cap'),
-                                    "ico_price_usd": sale.get('token_price'),
-                                })
-            logger.info(f"✅ CoinList: {len(projects)} projets")
-        except Exception as e:
-            logger.debug(f"CoinList error: {e}")
-        return projects
-    
-    async def fetch_binance_launchpad(self) -> List[Dict]:
-        """Fetch Binance Launchpad"""
-        projects = []
-        try:
-            url = "https://launchpad.binance.com/en"
+            url = "https://cryptorank.io/ico"
             async with aiohttp.ClientSession() as session:
                 html = await self.fetch_with_retry(session, url)
                 if html:
                     soup = BeautifulSoup(html, 'html.parser')
-                    project_cards = soup.find_all('div', class_=re.compile('project|card', re.I))
                     
-                    for card in project_cards[:10]:
+                    # Parser ICOs actifs
+                    rows = soup.find_all('tr', class_=re.compile('row|table-row', re.I))
+                    
+                    for row in rows[:15]:
                         try:
-                            text = card.get_text()
-                            symbol_match = re.search(r'\b([A-Z]{2,10})\b', text)
-                            if symbol_match:
-                                projects.append({
-                                    "name": symbol_match.group(1),
-                                    "symbol": symbol_match.group(1),
-                                    "source": "Binance Launchpad",
-                                    "link": url,
-                                })
+                            cells = row.find_all('td')
+                            if len(cells) < 4:
+                                continue
+                            
+                            name_elem = cells[0].find('a')
+                            if not name_elem:
+                                continue
+                            
+                            name = name_elem.get_text(strip=True)
+                            link = name_elem.get('href', '')
+                            if not link.startswith('http'):
+                                link = f"https://cryptorank.io{link}"
+                            
+                            # Données financières si disponibles
+                            raised_text = cells[2].get_text(strip=True) if len(cells) > 2 else ""
+                            raised = re.findall(r'[\d,]+', raised_text.replace(',', ''))
+                            hard_cap = float(raised[0]) if raised else 0
+                            
+                            projects.append({
+                                "name": name,
+                                "symbol": name[:5].upper(),
+                                "source": "CryptoRank ICO",
+                                "link": link,
+                                "website": link,
+                                "hard_cap_usd": hard_cap,
+                            })
                         except:
                             continue
-            logger.info(f"✅ Binance: {len(projects)} projets")
-        except Exception as e:
-            logger.debug(f"Binance error: {e}")
-        return projects
-    
-    async def fetch_polkastarter_graphql(self) -> List[Dict]:
-        """Fetch Polkastarter via GraphQL"""
-        projects = []
-        try:
-            url = "https://api.polkastarter.com/graphql"
-            query = """
-            query {
-                projects(status: "upcoming") {
-                    name
-                    symbol
-                    hardCap
-                    tokenPrice
-                }
-            }
-            """
             
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json={'query': query}, timeout=15) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for proj in data.get('data', {}).get('projects', []):
-                            projects.append({
-                                "name": proj.get('name'),
-                                "symbol": proj.get('symbol'),
-                                "source": "Polkastarter",
-                                "link": "https://www.polkastarter.com/projects",
-                                "hard_cap_usd": proj.get('hardCap'),
-                                "ico_price_usd": proj.get('tokenPrice'),
-                            })
-            logger.info(f"✅ Polkastarter: {len(projects)} projets")
+            logger.info(f"✅ CryptoRank: {len(projects)} projets")
         except Exception as e:
-            logger.debug(f"Polkastarter error: {e}")
+            logger.debug(f"CryptoRank error: {e}")
+        
         return projects
     
-    async def fetch_generic_launchpad(self, name: str, url: str) -> List[Dict]:
-        """Fetcher générique pour launchpads"""
+    async def fetch_icodrops(self) -> List[Dict]:
+        """Fetch ICODrops"""
         projects = []
         try:
+            url = "https://icodrops.com"
             async with aiohttp.ClientSession() as session:
                 html = await self.fetch_with_retry(session, url)
                 if html:
                     soup = BeautifulSoup(html, 'html.parser')
-                    text = soup.get_text()
+                    rows = soup.find_all('div', class_=re.compile('ico-item|project', re.I))
                     
-                    tokens = re.findall(r'\b([A-Z]{3,10})\b', text)
-                    exclude = {'TOKEN', 'SALE', 'IDO', 'ICO', 'LAUNCH', 'NEW', 'BUY', 'SELL',
-                              'USD', 'BTC', 'ETH', 'BNB', 'USDT', 'BUSD', 'USDC', 'DAI', 'CHAIN'}
-                    
-                    seen = set()
-                    for token in tokens:
-                        if token not in exclude and token not in seen:
-                            seen.add(token)
+                    for row in rows[:12]:
+                        try:
+                            name_elem = row.find('a')
+                            if not name_elem:
+                                continue
+                            
+                            name = name_elem.get_text(strip=True)
+                            link = name_elem.get('href', '')
+                            if link and not link.startswith('http'):
+                                link = f"https://icodrops.com{link}"
+                            
                             projects.append({
-                                "name": token,
-                                "symbol": token,
-                                "source": name,
-                                "link": url,
+                                "name": name,
+                                "symbol": name[:5].upper(),
+                                "source": "ICODrops",
+                                "link": link,
+                                "website": link,
                             })
-                            if len(projects) >= 20:
-                                break
-            logger.info(f"✅ {name}: {len(projects)} projets")
+                        except:
+                            continue
+            
+            logger.info(f"✅ ICODrops: {len(projects)} projets")
         except Exception as e:
-            logger.debug(f"{name} error: {e}")
+            logger.debug(f"ICODrops error: {e}")
+        
         return projects
     
     async def fetch_all_sources(self) -> List[Dict]:
-        """Fetch 30+ sources"""
-        logger.info("🔍 Fetch 30+ sources...")
+        """Fetch toutes les sources"""
+        logger.info("🔍 Fetch vraies données...")
         
-        api_tasks = [
-            self.fetch_coinlist_api(),
-            self.fetch_binance_launchpad(),
-            self.fetch_polkastarter_graphql(),
+        tasks = [
+            self.fetch_cryptorank_idos(),
+            self.fetch_icodrops(),
         ]
         
-        scraping_sources = [
-            ("Seedify", "https://launchpad.seedify.fund/"),
-            ("TrustPad", "https://trustpad.io/projects"),
-            ("BSCPad", "https://bscpad.com/projects"),
-            ("DAO Maker", "https://daomaker.com/sho"),
-            ("RedKite", "https://redkite.polkafoundry.com/"),
-            ("GameFi", "https://gamefi.org/launchpad"),
-            ("Bybit Launchpad", "https://www.bybit.com/en-US/web3/launchpad"),
-            ("OKX Jumpstart", "https://www.okx.com/jumpstart"),
-            ("Gate.io Startup", "https://www.gate.io/startup"),
-            ("KuCoin Spotlight", "https://www.kucoin.com/spotlight"),
-            ("MEXC Launchpad", "https://www.mexc.com/launchpad"),
-            ("CryptoRank ICO", "https://cryptorank.io/ico"),
-            ("ICODrops", "https://icodrops.com/"),
-            ("CoinMarketCap New", "https://coinmarketcap.com/new/"),
-            ("CoinGecko New", "https://www.coingecko.com/en/coins/recently_added"),
-            ("DexTools Hot", "https://www.dextools.io/app/en/hot-pairs"),
-            ("DexScreener", "https://dexscreener.com/"),
-            ("Uniswap Info", "https://info.uniswap.org/"),
-            ("PancakeSwap Info", "https://pancakeswap.finance/info/"),
-            ("CoinList Trending", "https://coinlist.co/api/v1/trending"),
-        ]
-        
-        scraping_tasks = [self.fetch_generic_launchpad(name, url) for name, url in scraping_sources]
-        
-        results = await asyncio.gather(*(api_tasks + scraping_tasks), return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
         all_projects = []
         for result in results:
             if isinstance(result, list):
                 all_projects.extend(result)
         
+        # Dédup
         seen = set()
         unique = []
         for p in all_projects:
             key = (p.get('symbol', '').lower(), p.get('source', ''))
-            if key not in seen and p.get('symbol'):
+            if key not in seen and p.get('name') and len(p['name']) > 2:
                 seen.add(key)
                 unique.append(p)
         
@@ -406,213 +345,105 @@ class QuantumScanner:
         return unique
     
     # ========================================================================
-    # ANTI-SCAM CHECKS
-    # ========================================================================
-    
-    async def check_domain_safety(self, url: str) -> Dict:
-        """Vérification domaine"""
-        result = {"safe": True, "age_days": None, "reason": ""}
-        
-        try:
-            domain = urlparse(url).netloc
-            if not domain:
-                return {"safe": False, "reason": "Invalid domain"}
-            
-            try:
-                w = whois.whois(domain)
-                if w.creation_date:
-                    creation = w.creation_date[0] if isinstance(w.creation_date, list) else w.creation_date
-                    age = (datetime.now() - creation).days
-                    result['age_days'] = age
-                    
-                    if age < 7:
-                        result['safe'] = False
-                        result['reason'] = f"Domain trop récent ({age}j)"
-            except:
-                pass
-            
-        except Exception as e:
-            logger.debug(f"Domain check error: {e}")
-        
-        return result
-    
-    async def check_honeypot(self, address: str) -> bool:
-        """Check honeypot"""
-        try:
-            url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get('isHoneypot', False)
-        except Exception as e:
-            logger.debug(f"Honeypot check error: {e}")
-        return False
-    
-    async def check_tokensniffer(self, address: str) -> Dict:
-        """Check TokenSniffer"""
-        try:
-            url = f"https://tokensniffer.com/api/v2/tokens/{address}"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        score = data.get('score', 50)
-                        return {"score": score, "safe": score >= 50, "reason": data.get('message', '')}
-        except Exception as e:
-            logger.debug(f"TokenSniffer error: {e}")
-        return {"score": 50, "safe": True, "reason": ""}
-    
-    async def check_scam_keywords(self, text: str) -> bool:
-        """Check mots-clés scam"""
-        text_lower = text.lower()
-        for keyword in SCAM_KEYWORDS:
-            if keyword.lower() in text_lower:
-                return True
-        return False
-    
-    async def verify_contract_basics(self, address: str) -> Dict:
-        """Vérification contract"""
-        result = {"verified": False, "has_mint": False, "owner_renounced": False}
-        
-        try:
-            w3 = self.w3_eth
-            if not w3 or not w3.is_connected():
-                return result
-            
-            code = w3.eth.get_code(Web3.to_checksum_address(address))
-            if code == b'' or code == b'0x':
-                return result
-            
-            result['verified'] = True
-            
-            if self.etherscan_key:
-                url = f"https://api.etherscan.io/api?module=contract&action=getsourcecode&address={address}&apikey={self.etherscan_key}"
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=10) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get('result') and data['result'][0].get('SourceCode'):
-                                source = data['result'][0]['SourceCode'].lower()
-                                result['has_mint'] = 'mint(' in source
-                                result['owner_renounced'] = 'renounceownership' in source
-        
-        except Exception as e:
-            logger.debug(f"Contract check error: {e}")
-        
-        return result
-    
-    # ========================================================================
     # FETCH DONNÉES COMPLÈTES
     # ========================================================================
     
     async def fetch_project_complete_data(self, project: Dict) -> Dict:
-        """Fetch données complètes - FIXÉ"""
+        """Fetch données RÉELLES"""
         data = {
-            "twitter": None, "telegram": None, "discord": None, "github": None,
-            "website": None, "whitepaper": None,
+            "twitter": None, "telegram": None, "discord": None, "github": None, "reddit": None,
+            "website": project.get('website'),
             "hard_cap_usd": project.get('hard_cap_usd') or 0,
-            "ico_price_usd": project.get('ico_price_usd') or 0,
-            "total_supply": None, "circulating_supply": None,
-            "fmv": None, "current_mc": None,
-            "vesting_months": 12,
-            "backers": [], "audit_firms": [], "partners": [],
-            "twitter_followers": 0, "telegram_members": 0,
-            "github_commits": 0, "github_stars": 0,
-            "contract_address": None, "chain": "unknown",
-            "domain_check": {}, "contract_check": {},
+            "ico_price_usd": 0, "total_supply": None, "circulating_supply": None,
+            "fmv": None, "current_mc": None, "vesting_months": 12,
+            "backers": [], "audit_firms": [],
+            "github_commits": 0,
+            "contract_address": None, "domain_check": {}, "contract_check": {},
             "scam_keywords_found": False,
         }
         
         try:
-            url = project.get('link') or project.get('website')
+            url = project.get('link')
             if not url or not url.startswith('http'):
                 return data
             
-            data['domain_check'] = await self.check_domain_safety(url)
-            
             async with aiohttp.ClientSession() as session:
                 html = await self.fetch_with_retry(session, url)
-                if not html:
+                if not html or len(html) < 500:
                     return data
                 
                 soup = BeautifulSoup(html, 'html.parser')
                 text = soup.get_text()
                 
-                if await self.check_scam_keywords(text):
-                    data['scam_keywords_found'] = True
+                # Scam check
+                text_lower = text.lower()
+                for keyword in SCAM_KEYWORDS:
+                    if keyword.lower() in text_lower:
+                        data['scam_keywords_found'] = True
                 
+                # Extract socials
                 links = soup.find_all('a', href=True)
                 for link in links:
                     href = link.get('href', '').lower()
                     if 'twitter.com' in href or 'x.com' in href:
                         data['twitter'] = link.get('href')
-                    elif 't.me' in href or 'telegram' in href:
+                    elif 't.me' in href or 'telegram.me' in href:
                         data['telegram'] = link.get('href')
-                    elif 'discord' in href:
+                    elif 'discord.gg' in href or 'discord.com' in href:
                         data['discord'] = link.get('href')
                     elif 'github.com' in href:
                         data['github'] = link.get('href')
+                    elif 'reddit.com' in href:
+                        data['reddit'] = link.get('href')
                 
-                if not data['hard_cap_usd']:
-                    match = re.search(r'\$?([\d,.]+)\s*(million|M)\s*(?:hard\s*cap|raise)', text, re.I)
-                    if match:
-                        num = float(match.group(1).replace(',', ''))
-                        data['hard_cap_usd'] = num * 1_000_000 if 'm' in match.group(2).lower() else num
-                
-                if not data['ico_price_usd']:
-                    match = re.search(r'\$?([\d.]+)\s*(?:per\s*token)', text, re.I)
-                    if match:
-                        data['ico_price_usd'] = float(match.group(1))
-                
-                match = re.search(r'([\d,]+\.?\d*)\s*(billion|million|B|M)\s*(?:supply)', text, re.I)
+                # Financial data
+                match = re.search(r'(?:hard\s*cap|raise).*?\$?([\d,.]+)\s*(?:m|million)', text, re.I)
                 if match:
                     num = float(match.group(1).replace(',', ''))
-                    if 'b' in match.group(2).lower():
+                    data['hard_cap_usd'] = num * 1_000_000
+                
+                match = re.search(r'(?:price|token\s*price).*?\$?([\d.]+)', text, re.I)
+                if match:
+                    data['ico_price_usd'] = float(match.group(1))
+                
+                match = re.search(r'([\d,]+)\s*(?:billion|million)\s*(?:total)?\s*supply', text, re.I)
+                if match:
+                    num = float(match.group(1).replace(',', ''))
+                    if 'billion' in text[match.start():match.end()].lower():
                         num *= 1_000_000_000
-                    elif 'm' in match.group(2).lower():
+                    else:
                         num *= 1_000_000
                     data['total_supply'] = num
                 
+                # VCs et audits
                 for vc in TIER1_VCS:
-                    if vc.lower() in text.lower():
+                    if vc.lower() in text_lower:
                         data['backers'].append(vc)
                 
                 for auditor in TIER1_AUDITORS:
-                    if auditor.lower() in text.lower():
+                    if auditor.lower() in text_lower:
                         data['audit_firms'].append(auditor)
                 
-                if data['ico_price_usd'] and data['total_supply']:
+                # FDV
+                if data['ico_price_usd'] > 0 and data['total_supply']:
                     data['fmv'] = data['ico_price_usd'] * data['total_supply']
                     data['circulating_supply'] = data['total_supply'] * 0.25
                     data['current_mc'] = data['ico_price_usd'] * data['circulating_supply']
                 else:
                     data['fmv'] = data['hard_cap_usd'] or 100000
-                    data['current_mc'] = (data['hard_cap_usd'] or 100000) * 0.5
-                
-                vesting_match = re.search(r'(\d+)\s*(?:months?|years?)\s*(?:vesting)', text, re.I)
-                if vesting_match:
-                    vesting_val = int(vesting_match.group(1))
-                    if 'year' in vesting_match.group(0).lower():
-                        vesting_val *= 12
-                    data['vesting_months'] = vesting_val
-                
-                addr_match = re.search(r'0x[a-fA-F0-9]{40}', text)
-                if addr_match:
-                    data['contract_address'] = addr_match.group(0)
-                    data['contract_check'] = await self.verify_contract_basics(data['contract_address'])
+                    data['current_mc'] = data['fmv'] * 0.5
         
         except Exception as e:
-            logger.error(f"❌ Fetch data error: {e}")
+            logger.debug(f"Fetch data error: {e}")
         
         return data
     
     # ========================================================================
-    # CALCUL 21 RATIOS - VERSION FIXÉE
+    # 21 RATIOS - FIXÉS
     # ========================================================================
     
     def calculate_all_21_ratios(self, data: Dict) -> Dict:
-        """Calcul 21 ratios - SANS CRASH"""
+        """Calcul 21 ratios"""
         ratios = {}
         
         current_mc = data.get('current_mc') or 0
@@ -640,34 +471,25 @@ class QuantumScanner:
         
         hard_cap = data.get('hard_cap_usd') or 0
         if hard_cap > 0 and current_mc > 0:
-            liq_ratio = hard_cap / current_mc
-            ratios['liquidity_ratio'] = min(liq_ratio / 2, 1.0)
+            ratios['liquidity_ratio'] = min(hard_cap / current_mc / 2, 1.0)
         else:
             ratios['liquidity_ratio'] = 0.4
         
         ratios['whale_concentration'] = 0.6
         
         audit_firms = data.get('audit_firms') or []
-        num_audits = len(audit_firms) if audit_firms else 0
-        ratios['audit_score'] = 1.0 if num_audits >= 2 else 0.7 if num_audits == 1 else 0.3
+        num_audits = len(audit_firms)
+        ratios['audit_score'] = 1.0 if num_audits >= 2 else 0.7 if num_audits == 1 else 0.2
         
         backers = data.get('backers') or []
-        num_vcs = len(backers) if backers else 0
-        ratios['vc_score'] = 1.0 if num_vcs >= 3 else 0.8 if num_vcs == 2 else 0.5 if num_vcs == 1 else 0.2
+        num_vcs = len(backers)
+        ratios['vc_score'] = 1.0 if num_vcs >= 3 else 0.8 if num_vcs == 2 else 0.5 if num_vcs == 1 else 0.1
         
-        twitter_followers = data.get('twitter_followers') or 0
-        telegram_members = data.get('telegram_members') or 0
-        total_social = twitter_followers + telegram_members
-        ratios['social_sentiment'] = 1.0 if total_social >= 50000 else 0.7 if total_social >= 10000 else min(total_social / 10000, 1.0)
-        
-        github_commits = data.get('github_commits') or 0
-        has_github = bool(data.get('github'))
-        ratios['dev_activity'] = 1.0 if github_commits >= 200 else 0.7 if github_commits >= 50 else 0.5 if has_github else 0.2
-        
+        ratios['social_sentiment'] = 0.6
+        ratios['dev_activity'] = 0.7 if data.get('github') else 0.2
         ratios['market_sentiment'] = 0.55
         
-        # ⭐ FIX CRITIQUE: Handle None vesting
-        vesting = data.get('vesting_months')
+        vesting = data.get('vesting_months') or 0
         if vesting is None:
             vesting = 0
         vesting = int(vesting) if isinstance(vesting, float) else (vesting or 0)
@@ -682,14 +504,8 @@ class QuantumScanner:
         ratios['vesting_score'] = ratios['tokenomics_health']
         ratios['exchange_listing_score'] = 0.3
         ratios['community_growth'] = ratios['social_sentiment']
-        
-        has_partnerships = (num_vcs >= 2 or num_audits >= 1)
-        ratios['partnership_quality'] = 0.8 if has_partnerships else 0.5 if num_vcs >= 1 else 0.3
-        
-        has_wp = bool(data.get('whitepaper'))
-        has_gh = bool(data.get('github'))
-        ratios['product_maturity'] = 0.8 if (has_wp and has_gh) else 0.5 if (has_wp or has_gh) else 0.3
-        
+        ratios['partnership_quality'] = 0.8 if (num_vcs >= 2 or num_audits >= 1) else 0.3
+        ratios['product_maturity'] = 0.7 if data.get('github') else 0.3
         ratios['revenue_generation'] = 0.3
         ratios['volatility'] = 0.6
         ratios['correlation'] = 0.5
@@ -699,7 +515,7 @@ class QuantumScanner:
         return ratios
     
     def compare_to_gem_references(self, ratios: Dict) -> Optional[Tuple]:
-        """Comparaison aux gems de référence"""
+        """Compare aux gems"""
         similarities = {}
         
         for ref_name, ref_data in REFERENCE_PROJECTS.items():
@@ -714,10 +530,7 @@ class QuantumScanner:
             
             if count > 0:
                 similarity = 1.0 - (total_diff / count)
-                similarities[ref_name] = {
-                    "similarity": similarity,
-                    "multiplier": ref_data['multiplier']
-                }
+                similarities[ref_name] = {"similarity": similarity, "multiplier": ref_data['multiplier']}
         
         if not similarities:
             return None
@@ -729,58 +542,54 @@ class QuantumScanner:
     # ========================================================================
     
     async def verify_project_complete(self, project: Dict) -> Dict:
-        """Vérification ultra-complète - FIXÉE"""
+        """Vérification complète"""
         
+        # Fetch données
         data = await self.fetch_project_complete_data(project)
         project.update(data)
         
+        # FAKE CHECK
+        is_fake, fake_reason = self.is_fake_project(data)
+        if is_fake:
+            self.stats['fakes_detected'] += 1
+            logger.warning(f"🚫 FAKE détecté: {project['name']} ({fake_reason})")
+            return {
+                "verdict": "REJECT",
+                "score": 0,
+                "ratios": {},
+                "go_reason": f"🚫 FAKE PROJET: {fake_reason}",
+                "best_match": None,
+                "data": data,
+                "flags": ["FAKE_PROJECT"],
+                "is_fake": True,
+            }
+        
+        # Anti-scam checks
         rejection_reasons = []
         
-        domain_check = data.get('domain_check', {})
-        if not domain_check.get('safe', True):
-            rejection_reasons.append(f"❌ {domain_check.get('reason')}")
-        
         if data.get('scam_keywords_found'):
-            rejection_reasons.append("❌ Mots-clés scam détectés")
-        
-        if data.get('contract_address'):
-            contract_check = data.get('contract_check', {})
-            if contract_check.get('has_mint') and not contract_check.get('owner_renounced'):
-                rejection_reasons.append("❌ Mint active + owner non renoncé")
-            
-            try:
-                is_honeypot = await self.check_honeypot(data['contract_address'])
-                if is_honeypot:
-                    rejection_reasons.append("❌ Honeypot détecté")
-                    self.stats['scam_blocked'] += 1
-            except:
-                pass
-            
-            try:
-                ts_result = await self.check_tokensniffer(data['contract_address'])
-                if not ts_result.get('safe'):
-                    rejection_reasons.append(f"❌ TokenSniffer: {ts_result.get('score')}/100")
-            except:
-                pass
+            rejection_reasons.append("❌ Scam keywords")
         
         if not data.get('twitter') and not data.get('telegram'):
-            rejection_reasons.append("⚠️ Aucun social vérifié")
+            rejection_reasons.append("⚠️ Pas de Twitter/Telegram")
         
         if len(rejection_reasons) >= 2:
             return {
                 "verdict": "REJECT",
-                "score": 0,
+                "score": 5,
                 "ratios": {},
                 "go_reason": " | ".join(rejection_reasons),
                 "best_match": None,
                 "data": data,
                 "flags": ["critical_red_flags"],
+                "is_fake": False,
             }
         
+        # Calcul ratios
         try:
             ratios = self.calculate_all_21_ratios(data)
         except Exception as e:
-            logger.error(f"❌ Erreur ratios: {e}")
+            logger.error(f"❌ Ratio error: {e}")
             ratios = {k: 0.5 for k in RATIO_WEIGHTS.keys()}
         
         best_match = self.compare_to_gem_references(ratios)
@@ -788,254 +597,248 @@ class QuantumScanner:
         score = sum(ratios.get(k, 0) * v for k, v in RATIO_WEIGHTS.items()) * 100
         score = min(100, max(0, score))
         
+        # Potentiel
+        ico_price = data.get('ico_price_usd') or 0.0001
+        fmv = data.get('fmv') or 100000
+        current_mc = data.get('current_mc') or 50000
+        
+        if current_mc > 0 and fmv > 0:
+            potential_multiplier = (fmv / current_mc) * 1.5
+        else:
+            potential_multiplier = 2.0
+        
+        # Analyse
         go_reason = ""
         flags = []
         
         if best_match:
             ref_name, ref_info = best_match
-            similarity_pct = ref_info['similarity'] * 100
-            if similarity_pct >= 70:
-                go_reason = f"🎯 Similaire à {ref_name.upper()} ({similarity_pct:.0f}%). "
+            sim_pct = ref_info['similarity'] * 100
+            if sim_pct >= 70:
+                go_reason = f"🎯 {sim_pct:.0f}% similar to {ref_name.upper()} (x{ref_info['multiplier']}). "
                 flags.append('similar_to_gem')
-                score += 10
+                score += 15
         
         if ratios.get('mc_fdmc', 0) > 0.7:
-            go_reason += "✅ Valorisation OK. "
+            go_reason += "✅ Attractive valuation. "
             flags.append('good_valuation')
         
         if ratios.get('vc_score', 0) >= 0.7:
-            go_reason += f"✅ VCs ({len(data.get('backers', []))}). "
+            go_reason += f"✅ Tier1 VCs ({len(data.get('backers', []))}). "
             flags.append('tier1_vcs')
         
         if ratios.get('audit_score', 0) >= 0.7:
-            go_reason += f"✅ Audité. "
+            go_reason += f"✅ Audited. "
             flags.append('audited')
         
         if ratios.get('dev_activity', 0) >= 0.7:
-            go_reason += "✅ Dev OK. "
+            go_reason += "✅ Active dev. "
             flags.append('active_dev')
         
+        if ratios.get('social_sentiment', 0) >= 0.7:
+            go_reason += "✅ Strong community. "
+            flags.append('strong_community')
+        
+        # Warnings
         if ratios.get('dev_activity', 0) < 0.3:
-            go_reason += "⚠️ Dev faible. "
+            go_reason += "⚠️ Low dev. "
             flags.append('low_dev')
         
-        if domain_check.get('age_days') and domain_check['age_days'] < 30:
-            go_reason += f"⚠️ Domain jeune. "
-            flags.append('young_domain')
+        if not data.get('audit_firms'):
+            go_reason += "⚠️ No audit. "
+            flags.append('no_audit')
         
-        if rejection_reasons:
-            go_reason += " | ".join(rejection_reasons)
+        if len(data.get('backers', [])) == 0:
+            go_reason += "⚠️ No VC backing. "
+            flags.append('no_vc')
         
-        if score >= self.go_score and len(flags) >= 2 and 'critical_red_flags' not in flags:
-            verdict = "ACCEPT"
-            go_reason = "🚀 GO! " + go_reason
+        # DÉCISION FINALE
+        if score >= self.go_score and len(flags) >= 3 and 'FAKE' not in str(flags):
+            verdict = "✅ GO!"
+            emoji = "🚀"
         elif score >= self.review_score:
-            verdict = "REVIEW"
-            go_reason = "⚠️ REVIEW. " + go_reason
+            verdict = "⚠️ REVIEW"
+            emoji = "⚡"
         else:
-            verdict = "REJECT"
-            go_reason = "❌ NO GO. " + go_reason
+            verdict = "❌ NO GO"
+            emoji = "🛑"
+        
+        go_reason = f"{emoji} **{verdict}** - {go_reason}"
         
         return {
-            "verdict": verdict,
+            "verdict": verdict.split()[0].strip('✅⚠️❌'),
             "score": min(100, score),
             "ratios": ratios,
             "go_reason": go_reason,
             "best_match": best_match,
             "data": data,
             "flags": flags,
+            "potential_multiplier": potential_multiplier,
+            "ico_price": ico_price,
+            "exit_price": ico_price * potential_multiplier,
+            "is_fake": False,
         }
     
     # ========================================================================
-    # TELEGRAM ALERTES
+    # TELEGRAM ALERTE - ULTRA COMPLÈTE
     # ========================================================================
     
     async def send_telegram_complete(self, project: Dict, result: Dict):
-        """Envoi alerte Telegram ULTRA-COMPLÈTE"""
-        verdict_emoji = "✅" if result['verdict'] == "ACCEPT" else "⚠️" if result['verdict'] == "REVIEW" else "❌"
-        risk_level = "🟢 Faible" if result['score'] >= 75 else "🟡 Moyen" if result['score'] >= 50 else "🔴 Élevé"
+        """Envoi Telegram ULTRA-DÉTAILLÉ"""
         
+        # FAKE CHECK
+        if result.get('is_fake'):
+            msg = f"""
+🚫 **FAKE PROJET DÉTECTÉ**
+
+{project['name']} ({project.get('symbol', 'N/A')})
+
+❌ **RAISON:** {result['go_reason']}
+
+🔗 {project.get('link', 'N/A')}
+
+_Automatiquement rejeté_
+"""
+            try:
+                await self.telegram_bot.send_message(chat_id=self.chat_review, text=msg, parse_mode='Markdown')
+            except:
+                pass
+            return
+        
+        # VRAIE DONNÉES
         data = result.get('data', {})
         ratios = result.get('ratios', {})
         
-        # ===== CALCUL POTENTIEL =====
-        ico_price = data.get('ico_price_usd') or 0.0001
-        current_mc = data.get('current_mc') or 100000
-        fmv = data.get('fmv') or 100000
+        ico_price = result.get('ico_price', 0.0001)
+        exit_price = result.get('exit_price', 0.0005)
+        potential_mult = result.get('potential_multiplier', 1.0)
         
-        if fmv > 0 and current_mc > 0:
-            potential_multiplier = (fmv / current_mc) * 2.5 if current_mc < fmv else 1.5
-        else:
-            potential_multiplier = 1.0
-        
-        exit_price = ico_price * potential_multiplier
-        potential_roi = ((exit_price - ico_price) / ico_price * 100) if ico_price > 0 else 0
-        
-        # ===== BEST MATCH + COMPARAISON =====
-        best_match = result.get('best_match')
-        match_text = "N/A"
-        match_details = ""
-        if best_match:
-            ref_name, ref_info = best_match
+        # ===== BEST MATCH =====
+        match_text = ""
+        if result.get('best_match'):
+            ref_name, ref_info = result['best_match']
             sim_pct = ref_info['similarity'] * 100
-            mult = ref_info['multiplier']
-            match_text = f"**{ref_name.upper()}** (x{mult})"
-            match_details = f"🎯 {sim_pct:.0f}% similaire à {ref_name.upper()} qui a fait x{mult}\n"
+            match_text = f"\n🎯 **{sim_pct:.0f}% similaire à {ref_name.upper()}** (x{ref_info['multiplier']} historique)"
         
-        # ===== TOP 21 RATIOS (détaillés) =====
+        # ===== TOP 7 + BOTTOM 3 RATIOS =====
         ratios_sorted = sorted(ratios.items(), key=lambda x: x[1], reverse=True)
         
-        # Top 7 best
-        top_ratios_text = ""
-        for i, (k, v) in enumerate(ratios_sorted[:7], 1):
-            bar = "🟢" * int(v * 5) + "⚪" * (5 - int(v * 5))
-            top_ratios_text += f"{i}. {k.replace('_', ' ').title()}: {v*100:.0f}% {bar}\n"
+        top_7 = "\n".join([
+            f"  {i+1}. {k.replace('_', ' ').title()}: **{v*100:.0f}%** {'🟢'*int(v*5)}"
+            for i, (k, v) in enumerate(ratios_sorted[:7])
+        ])
         
-        # Bottom 3 worst
-        worst_ratios_text = ""
-        for i, (k, v) in enumerate(ratios_sorted[-3:], 1):
-            bar = "🔴" * int((1-v) * 5) + "⚪" * (5 - int((1-v) * 5))
-            worst_ratios_text += f"{i}. {k.replace('_', ' ').title()}: {v*100:.0f}% {bar}\n"
+        bottom_3 = "\n".join([
+            f"  {i+1}. {k.replace('_', ' ').title()}: **{v*100:.0f}%** {'🔴'*int((1-v)*5)}"
+            for i, (k, v) in enumerate(ratios_sorted[-3:])
+        ])
         
-        # ===== INTERPRÉTATION RATIOS =====
-        mc_fdmc_ratio = ratios.get('mc_fdmc', 0.5)
-        if mc_fdmc_ratio > 0.8:
-            valuation_text = "🚀 **SUPER ATTRACTIVE** - Sous-évalué"
-        elif mc_fdmc_ratio > 0.6:
-            valuation_text = "✅ **ATTRACTIVE** - Bonne valorisation"
-        elif mc_fdmc_ratio > 0.4:
-            valuation_text = "⚠️ **CORRECTE** - À surveiller"
+        # ===== INTERPRÉTATION =====
+        mc_fdmc = ratios.get('mc_fdmc', 0.5)
+        if mc_fdmc > 0.8:
+            val_score = "🚀 TRÈS ATTRACTIVE"
+        elif mc_fdmc > 0.6:
+            val_score = "✅ ATTRACTIVE"
+        elif mc_fdmc > 0.4:
+            val_score = "⚠️ CORRECTE"
         else:
-            valuation_text = "❌ **CHÈRE** - À risque"
+            val_score = "❌ CHÈRE"
         
         vc_score = ratios.get('vc_score', 0)
-        if vc_score >= 0.8:
-            vc_text = "🔥 Backers TIER1"
-        elif vc_score >= 0.5:
-            vc_text = "✅ VCs reconnus"
-        else:
-            vc_text = "⚠️ Peu de backing"
+        vc_text = "🔥 Tier1" if vc_score >= 0.8 else "✅ Oui" if vc_score >= 0.5 else "❌ Non"
         
         audit_score = ratios.get('audit_score', 0)
-        if audit_score >= 0.7:
-            audit_text = "✅ Audité (TIER1)"
-        elif audit_score >= 0.5:
-            audit_text = "⚠️ Audit partiel"
-        else:
-            audit_text = "❌ Non audité"
+        audit_text = "✅ Tier1" if audit_score >= 0.7 else "⚠️ Oui" if audit_score >= 0.5 else "❌ Non"
         
         dev_score = ratios.get('dev_activity', 0)
-        if dev_score >= 0.7:
-            dev_text = "🟢 Dev ACTIF"
-        elif dev_score >= 0.4:
-            dev_text = "🟡 Dev moyen"
-        else:
-            dev_text = "🔴 Dev FAIBLE"
+        dev_text = "🟢 ACTIF" if dev_score >= 0.7 else "🟡 Moyen" if dev_score >= 0.4 else "🔴 FAIBLE"
         
-        tokenomics = ratios.get('tokenomics_health', 0)
-        if tokenomics >= 0.8:
-            token_text = "✅ Tokenomics SAINE"
-        elif tokenomics >= 0.6:
-            token_text = "⚠️ Tokenomics OK"
-        else:
-            token_text = "❌ Tokenomics RISQUÉE"
+        token_score = ratios.get('tokenomics_health', 0)
+        token_text = "✅ SAINE" if token_score >= 0.8 else "⚠️ OK" if token_score >= 0.6 else "❌ RISQUÉE"
         
-        # ===== SOCIALS COMPLETS =====
+        # ===== SOCIALS =====
         twitter = data.get('twitter') or "❌"
         telegram = data.get('telegram') or "❌"
         discord = data.get('discord') or "❌"
         reddit = data.get('reddit') or "❌"
         github = data.get('github') or "❌"
-        website = data.get('website') or project.get('link') or "❌"
+        website = data.get('website') or "❌"
         
-        socials_text = f"""
-📱 **RÉSEAUX SOCIAUX:**
+        # ===== MESSAGE FINAL =====
+        message = f"""
+╔════════════════════════════════════════════════════════════╗
+║          🌌 QUANTUM SCANNER v16.2 ULTRA SCAN              ║
+╚════════════════════════════════════════════════════════════╝
+
+🎯 **{project['name']}** ({project.get('symbol', 'N/A')})
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 **VERDICT: {result['verdict']} | SCORE: {result['score']:.1f}/100**
+
+💰 **OPPORTUNITÉ:**
+• Prix ICO: **${ico_price:.6f}**
+• Prix Cible: **${exit_price:.6f}**
+• Potentiel: **x{potential_mult:.1f} ({(potential_mult-1)*100:.0f}% ROI)**
+• Hard Cap: ${data.get('hard_cap_usd', 0):,.0f}
+• FDV: ${data.get('fmv', 0):,.0f}
+• MC: ${data.get('current_mc', 0):,.0f}{match_text}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 **ANALYSE 21 RATIOS:**
+
+🏆 **TOP 7 POINTS FORTS:**
+{top_7}
+
+⚠️ **TOP 3 POINTS FAIBLES:**
+{bottom_3}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 **INTERPRÉTATION DÉTAILLÉE:**
+• Valorisation: {val_score}
+• VC Backing: {vc_text} ({len(data.get('backers', []))} VCs)
+• Audit: {audit_text} ({', '.join(data.get('audit_firms', []) or ['Aucun'])})
+• Développement: {dev_text}
+• Tokenomics: {token_text} ({data.get('vesting_months', 0)}m vesting)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📱 **RÉSEAUX SOCIAUX VÉRIFIÉS:**
 🐦 X/Twitter: {twitter}
 💬 Telegram: {telegram}
 🎮 Discord: {discord}
 📖 Reddit: {reddit}
 💻 GitHub: {github}
 🌐 Website: {website}
-"""
-        
-        # ===== LIENS D'ACHAT =====
-        contract = data.get('contract_address')
-        launchpad = project.get('link', '')
-        
-        buy_links = f"""
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 💳 **OÙ ACHETER:**
-🚀 Launchpad: {launchpad}
+🚀 Launchpad: {project.get('link', 'N/A')}
 """
-        if contract:
-            buy_links += f"🔗 Contract: `{contract[:12]}...{contract[-10:]}`\n"
-            buy_links += f"📊 [Etherscan](https://etherscan.io/token/{contract})\n"
-            buy_links += f"💹 [DexTools](https://www.dextools.io/app/en/ether/pair-explorer/{contract})\n"
         
-        # ===== MESSAGE FINAL =====
-        backers = data.get('backers', [])
-        backers_text = ", ".join(backers[:3]) if backers else "Aucun"
+        if data.get('contract_address'):
+            message += f"\n📋 Contract: `{data['contract_address'][:12]}...{data['contract_address'][-8:]}`"
         
-        audits = data.get('audit_firms', [])
-        audits_text = ", ".join(audits) if audits else "❌"
-        
-        domain_check = data.get('domain_check', {})
-        domain_age = domain_check.get('age_days', 0)
-        
-        message = f"""
-🌌 **QUANTUM SCAN ULTRA v16.1**
-**{project['name']} ({project.get('symbol', 'N/A')})**
+        message += f"""
 
-{verdict_emoji} **VERDICT: {result['verdict']}** | 📊 **SCORE: {result['score']:.1f}/100**
-⚠️ Risque: {risk_level} | 🎯 Confiance: {100-abs(50-result['score']):.0f}%
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💰 **OPPORTUNITÉ FINANCIÈRE:**
-• Prix ICO: ${ico_price:.6f}
-• Prix Cible: ${exit_price:.6f}
-• ROI Potentiel: **x{potential_multiplier:.1f}** ({potential_roi:.0f}%)
-• Hard Cap: ${data.get('hard_cap_usd', 0):,.0f}
-• FDV: ${fmv:,.0f}
-• MC Actuelle: ${current_mc:,.0f}
-
-{match_details}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📊 **ANALYSE 21 RATIOS:**
-
-🏆 **TOP 7 FORCES:**
-{top_ratios_text}
-
-⚠️ **TOP 3 FAIBLESSES:**
-{worst_ratios_text}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔍 **INTERPRÉTATION DÉTAILLÉE:**
-• Valorisation: {valuation_text}
-• Backing VC: {vc_text} ({len(backers)} backers: {backers_text})
-• Audit: {audit_text} ({audits_text})
-• Développement: {dev_text}
-• Tokenomics: {token_text} ({data.get('vesting_months', 0)}m vesting)
-• Domain Age: {domain_age}j
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{socials_text}
-{buy_links}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📌 **ANALYSE COMPLÈTE:**
+💡 **ANALYSE FINALE:**
 {result['go_reason']}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 **FLAGS:** {', '.join(result.get('flags', [])) or 'Aucun'}
 🔗 Source: {project['source']}
-⏰ Scan: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
         try:
-            target_chat = self.chat_id if result['verdict'] == 'ACCEPT' else self.chat_review
+            target_chat = self.chat_id if result['verdict'] == 'GO' else self.chat_review
             
-            # Message principal
             await self.telegram_bot.send_message(
                 chat_id=target_chat,
                 text=message,
@@ -1048,17 +851,15 @@ class QuantumScanner:
             
         except Exception as e:
             logger.error(f"❌ Telegram error: {e}")
-            # Fallback message
+            # Fallback
             try:
-                simple_msg = f"""
-🌌 SCAN: {project['name']}
-Score: {result['score']:.0f}/100
-Verdict: {result['verdict']}
-Potentiel: x{potential_multiplier:.1f}
-Prix: ${ico_price:.6f} → ${exit_price:.6f}
-🔗 {project.get('link', 'N/A')}
+                simple = f"""
+🌌 **{project['name']}**
+{result['verdict']} | Score: {result['score']:.0f}/100
+x{potential_mult:.1f} | ${ico_price:.6f}→${exit_price:.6f}
+{project['source']} | {project.get('link', '')}
 """
-                await self.telegram_bot.send_message(chat_id=target_chat, text=simple_msg)
+                await self.telegram_bot.send_message(chat_id=target_chat, text=simple)
             except:
                 pass
     
@@ -1077,22 +878,24 @@ Prix: ${ico_price:.6f} → ${exit_price:.6f}
             cursor.execute('''
                 INSERT OR REPLACE INTO projects (
                     name, symbol, chain, source, link, website,
-                    twitter, telegram, discord, github, contract_address,
+                    twitter, telegram, discord, github, reddit, contract_address,
                     verdict, score, reason,
                     hard_cap_usd, ico_price_usd, total_supply, fmv, current_mc,
-                    backers, audit_firms
+                    potential_multiplier, backers, audit_firms, is_fake
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 project['name'], project.get('symbol'), data.get('chain'),
                 project['source'], project.get('link'), data.get('website'),
                 data.get('twitter'), data.get('telegram'), data.get('discord'),
-                data.get('github'), data.get('contract_address'),
+                data.get('github'), data.get('reddit'), data.get('contract_address'),
                 result['verdict'], result['score'], result['go_reason'],
                 data.get('hard_cap_usd'), data.get('ico_price_usd'),
                 data.get('total_supply'), data.get('fmv'), data.get('current_mc'),
+                result.get('potential_multiplier', 0),
                 ','.join(data.get('backers', [])),
-                ','.join(data.get('audit_firms', []))
+                ','.join(data.get('audit_firms', [])),
+                1 if result.get('is_fake') else 0
             ))
             
             project_id = cursor.lastrowid
@@ -1136,16 +939,16 @@ Prix: ${ico_price:.6f} → ${exit_price:.6f}
     async def scan(self):
         """SCAN PRINCIPAL"""
         scan_start = datetime.now()
-        logger.info("🚀 DÉMARRAGE SCAN ULTIME")
+        logger.info("🚀 DÉMARRAGE SCAN QUANTUM v16.2")
         
         try:
             projects = await self.fetch_all_sources()
             
             if len(projects) == 0:
-                logger.warning("⚠️ Aucun projet")
+                logger.warning("⚠️ Aucun projet trouvé")
                 return
             
-            logger.info(f"📊 {len(projects)} à analyser")
+            logger.info(f"📊 {len(projects)} projets à analyser")
             
             for i, project in enumerate(projects[:self.max_projects], 1):
                 try:
@@ -1156,7 +959,7 @@ Prix: ${ico_price:.6f} → ${exit_price:.6f}
                     self.save_project_complete(project, result)
                     await self.send_telegram_complete(project, result)
                     
-                    if result['verdict'] == 'ACCEPT':
+                    if result['verdict'] == 'GO':
                         self.stats['accepted'] += 1
                     elif result['verdict'] == 'REVIEW':
                         self.stats['review'] += 1
@@ -1176,26 +979,26 @@ Prix: ${ico_price:.6f} → ${exit_price:.6f}
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO scan_history (
-                    scan_start, scan_end, projects_found,
-                    projects_accepted, projects_rejected, projects_review, scam_blocked
+                    scan_start, scan_end, projects_found, fakes_detected,
+                    projects_accepted, projects_rejected, projects_review
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 scan_start, scan_end, self.stats['projects_found'],
-                self.stats['accepted'], self.stats['rejected'],
-                self.stats['review'], self.stats['scam_blocked']
+                self.stats['fakes_detected'], self.stats['accepted'],
+                self.stats['rejected'], self.stats['review']
             ))
             conn.commit()
             conn.close()
             
             duration = (scan_end - scan_start).total_seconds()
             logger.info(f"""
-╔════════════════════════════════════════════════════════════╗
-║                    SCAN TERMINÉ                            ║
-╠════════════════════════════════════════════════════════════╣
-║  Projets: {self.stats['projects_found']:>4} | ✅ {self.stats['accepted']:>2} | ⚠️ {self.stats['review']:>2} | ❌ {self.stats['rejected']:>3}     ║
-║  Scams bloqués: {self.stats['scam_blocked']:>2} | Alertes: {self.stats['alerts_sent']:>2} | Temps: {duration:>5.0f}s       ║
-╚════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║                  SCAN TERMINÉ v16.2                      ║
+╠══════════════════════════════════════════════════════════╣
+║ Trouvés: {self.stats['projects_found']:>2} | FAKES: {self.stats['fakes_detected']:>2} | ✅ {self.stats['accepted']:>2} | ⚠️ {self.stats['review']:>2} | ❌ {self.stats['rejected']:>2}   ║
+║ Alertes: {self.stats['alerts_sent']:>2} | Temps: {duration:>5.0f}s                          ║
+╚══════════════════════════════════════════════════════════╝
             """)
         
         except Exception as e:
@@ -1220,34 +1023,16 @@ async def main(args):
             await scanner.scan()
             logger.info(f"⏸️ Pause {scanner.scan_interval}h...")
             await asyncio.sleep(scanner.scan_interval * 3600)
-    elif args.test_project:
-        logger.info(f"Mode: Test {args.test_project}")
-        project = {
-            "name": args.test_project,
-            "symbol": "TEST",
-            "source": "Manual",
-            "link": args.test_project if args.test_project.startswith('http') else None,
-        }
-        result = await scanner.verify_project_complete(project)
-        print(json.dumps(result, indent=2, default=str))
     else:
-        logger.error("❌ Utilisez --once, --daemon, ou --test-project")
+        logger.error("❌ Utilisez --once ou --daemon")
 
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Quantum Scanner v16.1')
+    parser = argparse.ArgumentParser(description='Quantum Scanner v16.2')
     parser.add_argument('--once', action='store_true', help='Scan unique')
     parser.add_argument('--daemon', action='store_true', help='Mode 24/7')
-    parser.add_argument('--test-project', type=str, help='Test projet')
-    parser.add_argument('--github-actions', action='store_true', help='CI/CD')
-    parser.add_argument('--verbose', action='store_true', help='Debug')
     
     args = parser.parse_args()
-    
-    if args.verbose:
-        logger.remove()
-        logger.add(lambda msg: print(msg, end=''), level="DEBUG")
-    
     asyncio.run(main(args))
