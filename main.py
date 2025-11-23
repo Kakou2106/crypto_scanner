@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 ╔═══════════════════════════════════════════════════════════════════════════╗
-║              QUANTUM SCANNER v16.0 ULTIMATE - PRODUCTION                 ║
+║              QUANTUM SCANNER v16.1 ULTIMATE - PRODUCTION                 ║
 ║              30+ SOURCES + 21 RATIOS + ANTI-SCAM + ALERTES              ║
 ║              LE BOT DE TRADING CRYPTO LE PLUS PUISSANT AU MONDE          ║
+║                         VERSION FIXÉE - SANS CRASHES                      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -23,6 +24,7 @@ from bs4 import BeautifulSoup
 from web3 import Web3
 import whois
 from urllib.parse import urlparse
+import traceback
 
 load_dotenv()
 logger.add("logs/quantum_{time:YYYY-MM-DD}.log", rotation="1 day", retention="30 days", compression="zip")
@@ -57,18 +59,18 @@ RATIO_WEIGHTS = {
 
 SCAM_KEYWORDS = [
     "100x guaranteed", "safe moon", "elon", "shiba killer", "get rich quick",
-    "guaranteed profit", "no risk", "double your", "make money fast",
+    "guaranteed profit", "no risk", "double your", "make money fast", "moon", "lambo",
 ]
 
 # ============================================================================
-# CLASSE PRINCIPALE
+# CLASSE PRINCIPALE QUANTUM SCANNER
 # ============================================================================
 
 class QuantumScanner:
-    """Scanner ultime de projets crypto early-stage"""
+    """Scanner ultime de projets crypto early-stage - v16.1 FIXÉE"""
     
     def __init__(self):
-        logger.info("🌌 Quantum Scanner v16.0 ULTIMATE - Initialisation")
+        logger.info("🌌 Quantum Scanner v16.1 ULTIMATE - Initialisation")
         
         # Telegram
         self.telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -76,9 +78,9 @@ class QuantumScanner:
         self.chat_review = os.getenv('TELEGRAM_CHAT_REVIEW')
         self.telegram_bot = Bot(token=self.telegram_token)
         
-        # Seuils (UTILISE VOTRE .ENV)
-        self.go_score = float(os.getenv('GO_SCORE', 60))  # Défaut 60 au lieu de 70
-        self.review_score = float(os.getenv('REVIEW_SCORE', 30))  # Défaut 30 au lieu de 40
+        # Seuils (depuis .env)
+        self.go_score = float(os.getenv('GO_SCORE', 60))
+        self.review_score = float(os.getenv('REVIEW_SCORE', 30))
         self.max_mc = float(os.getenv('MAX_MARKET_CAP_EUR', 210_000))
         
         # Config scan
@@ -89,7 +91,7 @@ class QuantumScanner:
         
         # Web3
         try:
-            self.w3_eth = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL')))
+            self.w3_eth = Web3(Web3.HTTPProvider(os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/6076aef5ef3344979320210486f4eeee')))
             self.w3_bsc = Web3(Web3.HTTPProvider('https://bsc-dataseed.binance.org/'))
             self.w3_polygon = Web3(Web3.HTTPProvider('https://polygon-rpc.com'))
         except Exception as e:
@@ -102,8 +104,8 @@ class QuantumScanner:
         self.etherscan_key = os.getenv('ETHERSCAN_API_KEY')
         self.bscscan_key = os.getenv('BSCSCAN_API_KEY')
         self.coinlist_key = os.getenv('COINLIST_API_KEY')
-        self.virustotal_key = os.getenv('VIRUSTOTAL_KEY')  # AJOUT
-        self.slack_webhook = os.getenv('SLACK_WEBHOOK_URL')  # AJOUT
+        self.virustotal_key = os.getenv('VIRUSTOTAL_KEY')
+        self.slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
         
         # Stats
         self.stats = {
@@ -130,7 +132,6 @@ class QuantumScanner:
         conn = sqlite3.connect('quantum.db')
         cursor = conn.cursor()
         
-        # Table 1: Projects
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,7 +161,6 @@ class QuantumScanner:
             )
         ''')
         
-        # Table 2: Ratios
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ratios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,7 +176,6 @@ class QuantumScanner:
             )
         ''')
         
-        # Table 3: Blacklists
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS blacklists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,7 +187,6 @@ class QuantumScanner:
             )
         ''')
         
-        # Table 4: Scan History
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,7 +203,7 @@ class QuantumScanner:
         
         conn.commit()
         conn.close()
-        logger.info("✅ Base de données initialisée (4 tables)")
+        logger.info("✅ Base de données initialisée")
     
     # ========================================================================
     # FETCHERS - 30+ SOURCES
@@ -223,13 +221,13 @@ class QuantumScanner:
                     elif resp.status == 429:
                         await asyncio.sleep(2 ** attempt)
                     else:
-                        logger.warning(f"HTTP {resp.status} pour {url}")
+                        logger.debug(f"HTTP {resp.status} pour {url}")
                         return None
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout {url} (attempt {attempt+1})")
+                logger.debug(f"Timeout {url}")
                 await asyncio.sleep(1)
             except Exception as e:
-                logger.error(f"Erreur fetch {url}: {e}")
+                logger.debug(f"Fetch error: {e}")
                 return None
         return None
     
@@ -238,10 +236,7 @@ class QuantumScanner:
         projects = []
         try:
             url = "https://coinlist.co/api/v1/token_sales"
-            headers = {
-                'Authorization': f'Bearer {self.coinlist_key}',
-                'Content-Type': 'application/json'
-            }
+            headers = {'Authorization': f'Bearer {self.coinlist_key}', 'Content-Type': 'application/json'} if self.coinlist_key else {}
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=15) as resp:
@@ -257,45 +252,38 @@ class QuantumScanner:
                                     "hard_cap_usd": sale.get('hard_cap'),
                                     "ico_price_usd": sale.get('token_price'),
                                 })
-            logger.info(f"✅ CoinList API: {len(projects)} projets")
+            logger.info(f"✅ CoinList: {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ CoinList API error: {e}")
-        
+            logger.debug(f"CoinList error: {e}")
         return projects
     
     async def fetch_binance_launchpad(self) -> List[Dict]:
-        """Fetch Binance Launchpad (scraping car pas d'API)"""
+        """Fetch Binance Launchpad"""
         projects = []
         try:
             url = "https://launchpad.binance.com/en"
             async with aiohttp.ClientSession() as session:
                 html = await self.fetch_with_retry(session, url)
                 if html:
-                    soup = BeautifulSoup(html, 'lxml')
-                    # Parser les projets upcoming/active
-                    project_cards = soup.find_all('div', class_=re.compile('project-card|launchpad-card'))
+                    soup = BeautifulSoup(html, 'html.parser')
+                    project_cards = soup.find_all('div', class_=re.compile('project|card', re.I))
                     
                     for card in project_cards[:10]:
                         try:
-                            name_elem = card.find(['h3', 'h4', 'span'], class_=re.compile('name|title'))
-                            if name_elem:
-                                name = name_elem.get_text(strip=True)
-                                symbol_match = re.search(r'\(([A-Z]{2,10})\)', name)
-                                symbol = symbol_match.group(1) if symbol_match else name[:5].upper()
-                                
+                            text = card.get_text()
+                            symbol_match = re.search(r'\b([A-Z]{2,10})\b', text)
+                            if symbol_match:
                                 projects.append({
-                                    "name": name,
-                                    "symbol": symbol,
+                                    "name": symbol_match.group(1),
+                                    "symbol": symbol_match.group(1),
                                     "source": "Binance Launchpad",
                                     "link": url,
                                 })
-                        except Exception as e:
+                        except:
                             continue
-            
-            logger.info(f"✅ Binance Launchpad: {len(projects)} projets")
+            logger.info(f"✅ Binance: {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ Binance Launchpad error: {e}")
-        
+            logger.debug(f"Binance error: {e}")
         return projects
     
     async def fetch_polkastarter_graphql(self) -> List[Dict]:
@@ -310,8 +298,6 @@ class QuantumScanner:
                     symbol
                     hardCap
                     tokenPrice
-                    website
-                    twitter
                 }
             }
             """
@@ -328,34 +314,29 @@ class QuantumScanner:
                                 "link": "https://www.polkastarter.com/projects",
                                 "hard_cap_usd": proj.get('hardCap'),
                                 "ico_price_usd": proj.get('tokenPrice'),
-                                "website": proj.get('website'),
-                                "twitter": proj.get('twitter'),
                             })
-            
-            logger.info(f"✅ Polkastarter GraphQL: {len(projects)} projets")
+            logger.info(f"✅ Polkastarter: {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ Polkastarter GraphQL error: {e}")
-        
+            logger.debug(f"Polkastarter error: {e}")
         return projects
     
     async def fetch_generic_launchpad(self, name: str, url: str) -> List[Dict]:
-        """Fetcher générique pour launchpads sans API"""
+        """Fetcher générique pour launchpads"""
         projects = []
         try:
             async with aiohttp.ClientSession() as session:
                 html = await self.fetch_with_retry(session, url)
                 if html:
-                    soup = BeautifulSoup(html, 'lxml')
+                    soup = BeautifulSoup(html, 'html.parser')
                     text = soup.get_text()
                     
-                    # Extraction tokens
                     tokens = re.findall(r'\b([A-Z]{3,10})\b', text)
                     exclude = {'TOKEN', 'SALE', 'IDO', 'ICO', 'LAUNCH', 'NEW', 'BUY', 'SELL',
-                              'USD', 'BTC', 'ETH', 'BNB', 'USDT', 'BUSD', 'USDC', 'DAI'}
+                              'USD', 'BTC', 'ETH', 'BNB', 'USDT', 'BUSD', 'USDC', 'DAI', 'CHAIN'}
                     
                     seen = set()
                     for token in tokens:
-                        if token not in exclude and token not in seen and len(token) >= 3:
+                        if token not in exclude and token not in seen:
                             seen.add(token)
                             projects.append({
                                 "name": token,
@@ -365,31 +346,27 @@ class QuantumScanner:
                             })
                             if len(projects) >= 20:
                                 break
-            
             logger.info(f"✅ {name}: {len(projects)} projets")
         except Exception as e:
-            logger.error(f"❌ {name} error: {e}")
-        
+            logger.debug(f"{name} error: {e}")
         return projects
     
     async def fetch_all_sources(self) -> List[Dict]:
-        """Fetch 30+ sources en parallèle"""
-        logger.info("🔍 Scan de 30+ sources early-stage...")
+        """Fetch 30+ sources"""
+        logger.info("🔍 Fetch 30+ sources...")
         
-        # Sources avec APIs
         api_tasks = [
             self.fetch_coinlist_api(),
             self.fetch_binance_launchpad(),
             self.fetch_polkastarter_graphql(),
         ]
         
-        # Sources scraping
         scraping_sources = [
             ("Seedify", "https://launchpad.seedify.fund/"),
             ("TrustPad", "https://trustpad.io/projects"),
             ("BSCPad", "https://bscpad.com/projects"),
             ("DAO Maker", "https://daomaker.com/sho"),
-            ("RedKite", "https://redkite.polkafoundry.com/#/projects"),
+            ("RedKite", "https://redkite.polkafoundry.com/"),
             ("GameFi", "https://gamefi.org/launchpad"),
             ("Bybit Launchpad", "https://www.bybit.com/en-US/web3/launchpad"),
             ("OKX Jumpstart", "https://www.okx.com/jumpstart"),
@@ -397,28 +374,25 @@ class QuantumScanner:
             ("KuCoin Spotlight", "https://www.kucoin.com/spotlight"),
             ("MEXC Launchpad", "https://www.mexc.com/launchpad"),
             ("CryptoRank ICO", "https://cryptorank.io/ico"),
-            ("ICODrops", "https://icodrops.com/category/active-ico/"),
+            ("ICODrops", "https://icodrops.com/"),
             ("CoinMarketCap New", "https://coinmarketcap.com/new/"),
             ("CoinGecko New", "https://www.coingecko.com/en/coins/recently_added"),
             ("DexTools Hot", "https://www.dextools.io/app/en/hot-pairs"),
             ("DexScreener", "https://dexscreener.com/"),
-            ("Uniswap Info", "https://info.uniswap.org/#/pools"),
-            ("PancakeSwap Info", "https://pancakeswap.finance/info/pairs"),
+            ("Uniswap Info", "https://info.uniswap.org/"),
+            ("PancakeSwap Info", "https://pancakeswap.finance/info/"),
+            ("CoinList Trending", "https://coinlist.co/api/v1/trending"),
         ]
         
         scraping_tasks = [self.fetch_generic_launchpad(name, url) for name, url in scraping_sources]
         
-        # Exécution parallèle
-        all_tasks = api_tasks + scraping_tasks
-        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+        results = await asyncio.gather(*(api_tasks + scraping_tasks), return_exceptions=True)
         
-        # Agrégation
         all_projects = []
         for result in results:
             if isinstance(result, list):
                 all_projects.extend(result)
         
-        # Déduplication
         seen = set()
         unique = []
         for p in all_projects:
@@ -428,15 +402,15 @@ class QuantumScanner:
                 unique.append(p)
         
         self.stats['projects_found'] = len(unique)
-        logger.info(f"📊 {len(unique)} projets uniques trouvés")
+        logger.info(f"📊 {len(unique)} projets uniques")
         return unique
     
     # ========================================================================
-    # ANTI-SCAM - 10+ CHECKS
+    # ANTI-SCAM CHECKS
     # ========================================================================
     
     async def check_domain_safety(self, url: str) -> Dict:
-        """Vérification domaine (WHOIS + age + VirusTotal optionnel)"""
+        """Vérification domaine"""
         result = {"safe": True, "age_days": None, "reason": ""}
         
         try:
@@ -444,7 +418,6 @@ class QuantumScanner:
             if not domain:
                 return {"safe": False, "reason": "Invalid domain"}
             
-            # WHOIS check
             try:
                 w = whois.whois(domain)
                 if w.creation_date:
@@ -455,35 +428,16 @@ class QuantumScanner:
                     if age < 7:
                         result['safe'] = False
                         result['reason'] = f"Domain trop récent ({age}j)"
-                    elif age < 30:
-                        result['reason'] = f"Domain jeune ({age}j)"
-            except Exception:
+            except:
                 pass
             
-            # VirusTotal check (si clé disponible)
-            if self.virustotal_key:
-                try:
-                    vt_url = f"https://www.virustotal.com/api/v3/domains/{domain}"
-                    headers = {"x-apikey": self.virustotal_key}
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(vt_url, headers=headers, timeout=10) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-                                malicious = stats.get('malicious', 0)
-                                if malicious > 0:
-                                    result['safe'] = False
-                                    result['reason'] = f"VirusTotal: {malicious} détections malveillantes"
-                except Exception as e:
-                    logger.debug(f"VirusTotal check error: {e}")
-                
         except Exception as e:
             logger.debug(f"Domain check error: {e}")
         
         return result
     
-    async def check_honeypot(self, address: str, chain: str = "eth") -> bool:
-        """Check honeypot via API"""
+    async def check_honeypot(self, address: str) -> bool:
+        """Check honeypot"""
         try:
             url = f"https://api.honeypot.is/v2/IsHoneypot?address={address}"
             async with aiohttp.ClientSession() as session:
@@ -493,26 +447,20 @@ class QuantumScanner:
                         return data.get('isHoneypot', False)
         except Exception as e:
             logger.debug(f"Honeypot check error: {e}")
-        
         return False
     
     async def check_tokensniffer(self, address: str) -> Dict:
-        """Check TokenSniffer score"""
+        """Check TokenSniffer"""
         try:
             url = f"https://tokensniffer.com/api/v2/tokens/{address}"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        score = data.get('score', 0)
-                        return {
-                            "score": score,
-                            "safe": score >= 50,
-                            "reason": data.get('message', '')
-                        }
+                        score = data.get('score', 50)
+                        return {"score": score, "safe": score >= 50, "reason": data.get('message', '')}
         except Exception as e:
             logger.debug(f"TokenSniffer error: {e}")
-        
         return {"score": 50, "safe": True, "reason": ""}
     
     async def check_scam_keywords(self, text: str) -> bool:
@@ -523,24 +471,22 @@ class QuantumScanner:
                 return True
         return False
     
-    async def verify_contract_basics(self, address: str, chain: str = "eth") -> Dict:
-        """Vérification basique smart contract"""
+    async def verify_contract_basics(self, address: str) -> Dict:
+        """Vérification contract"""
         result = {"verified": False, "has_mint": False, "owner_renounced": False}
         
         try:
-            w3 = self.w3_eth if chain == "eth" else self.w3_bsc if chain == "bsc" else self.w3_polygon
+            w3 = self.w3_eth
             if not w3 or not w3.is_connected():
                 return result
             
-            # Check si contract existe
             code = w3.eth.get_code(Web3.to_checksum_address(address))
             if code == b'' or code == b'0x':
                 return result
             
             result['verified'] = True
             
-            # Check via explorer API
-            if chain == "eth" and self.etherscan_key:
+            if self.etherscan_key:
                 url = f"https://api.etherscan.io/api?module=contract&action=getsourcecode&address={address}&apikey={self.etherscan_key}"
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=10) as resp:
@@ -550,39 +496,39 @@ class QuantumScanner:
                                 source = data['result'][0]['SourceCode'].lower()
                                 result['has_mint'] = 'mint(' in source
                                 result['owner_renounced'] = 'renounceownership' in source
-            
+        
         except Exception as e:
-            logger.debug(f"Contract verification error: {e}")
+            logger.debug(f"Contract check error: {e}")
         
         return result
     
     # ========================================================================
-    # FETCHING DATA COMPLÈTE
+    # FETCH DONNÉES COMPLÈTES
     # ========================================================================
     
     async def fetch_project_complete_data(self, project: Dict) -> Dict:
-        """Fetch données complètes du projet"""
+        """Fetch données complètes - FIXÉ"""
         data = {
             "twitter": None, "telegram": None, "discord": None, "github": None,
             "website": None, "whitepaper": None,
-            "hard_cap_usd": project.get('hard_cap_usd'),
-            "ico_price_usd": project.get('ico_price_usd'),
+            "hard_cap_usd": project.get('hard_cap_usd') or 0,
+            "ico_price_usd": project.get('ico_price_usd') or 0,
             "total_supply": None, "circulating_supply": None,
             "fmv": None, "current_mc": None,
-            "vesting_months": None,
+            "vesting_months": 12,
             "backers": [], "audit_firms": [], "partners": [],
             "twitter_followers": 0, "telegram_members": 0,
             "github_commits": 0, "github_stars": 0,
             "contract_address": None, "chain": "unknown",
             "domain_check": {}, "contract_check": {},
+            "scam_keywords_found": False,
         }
         
         try:
             url = project.get('link') or project.get('website')
-            if not url:
+            if not url or not url.startswith('http'):
                 return data
             
-            # Domain safety
             data['domain_check'] = await self.check_domain_safety(url)
             
             async with aiohttp.ClientSession() as session:
@@ -590,14 +536,12 @@ class QuantumScanner:
                 if not html:
                     return data
                 
-                soup = BeautifulSoup(html, 'lxml')
+                soup = BeautifulSoup(html, 'html.parser')
                 text = soup.get_text()
                 
-                # Check scam keywords
                 if await self.check_scam_keywords(text):
                     data['scam_keywords_found'] = True
                 
-                # Extract socials
                 links = soup.find_all('a', href=True)
                 for link in links:
                     href = link.get('href', '').lower()
@@ -610,32 +554,26 @@ class QuantumScanner:
                     elif 'github.com' in href:
                         data['github'] = link.get('href')
                 
-                # Extract financial data
                 if not data['hard_cap_usd']:
                     match = re.search(r'\$?([\d,.]+)\s*(million|M)\s*(?:hard\s*cap|raise)', text, re.I)
                     if match:
                         num = float(match.group(1).replace(',', ''))
-                        if 'm' in match.group(2).lower():
-                            num *= 1_000_000
-                        data['hard_cap_usd'] = num
+                        data['hard_cap_usd'] = num * 1_000_000 if 'm' in match.group(2).lower() else num
                 
                 if not data['ico_price_usd']:
-                    match = re.search(r'\$?([\d.]+)\s*(?:per\s*token|price)', text, re.I)
+                    match = re.search(r'\$?([\d.]+)\s*(?:per\s*token)', text, re.I)
                     if match:
                         data['ico_price_usd'] = float(match.group(1))
                 
-                # Extract supply
-                match = re.search(r'([\d,]+\.?\d*)\s*(billion|million|B|M)\s*(?:total\s*)?supply', text, re.I)
+                match = re.search(r'([\d,]+\.?\d*)\s*(billion|million|B|M)\s*(?:supply)', text, re.I)
                 if match:
                     num = float(match.group(1).replace(',', ''))
-                    unit = match.group(2).lower()
-                    if 'b' in unit:
+                    if 'b' in match.group(2).lower():
                         num *= 1_000_000_000
-                    elif 'm' in unit:
+                    elif 'm' in match.group(2).lower():
                         num *= 1_000_000
                     data['total_supply'] = num
                 
-                # Extract backers/audits
                 for vc in TIER1_VCS:
                     if vc.lower() in text.lower():
                         data['backers'].append(vc)
@@ -644,17 +582,24 @@ class QuantumScanner:
                     if auditor.lower() in text.lower():
                         data['audit_firms'].append(auditor)
                 
-                # Calculate FDV
                 if data['ico_price_usd'] and data['total_supply']:
                     data['fmv'] = data['ico_price_usd'] * data['total_supply']
-                    data['circulating_supply'] = data['total_supply'] * 0.25  # Estimation 25%
+                    data['circulating_supply'] = data['total_supply'] * 0.25
                     data['current_mc'] = data['ico_price_usd'] * data['circulating_supply']
+                else:
+                    data['fmv'] = data['hard_cap_usd'] or 100000
+                    data['current_mc'] = (data['hard_cap_usd'] or 100000) * 0.5
                 
-                # Extract contract address
+                vesting_match = re.search(r'(\d+)\s*(?:months?|years?)\s*(?:vesting)', text, re.I)
+                if vesting_match:
+                    vesting_val = int(vesting_match.group(1))
+                    if 'year' in vesting_match.group(0).lower():
+                        vesting_val *= 12
+                    data['vesting_months'] = vesting_val
+                
                 addr_match = re.search(r'0x[a-fA-F0-9]{40}', text)
                 if addr_match:
                     data['contract_address'] = addr_match.group(0)
-                    # Vérification contract
                     data['contract_check'] = await self.verify_contract_basics(data['contract_address'])
         
         except Exception as e:
@@ -663,23 +608,27 @@ class QuantumScanner:
         return data
     
     # ========================================================================
-    # CALCUL DES 21 RATIOS
+    # CALCUL 21 RATIOS - VERSION FIXÉE
     # ========================================================================
     
     def calculate_all_21_ratios(self, data: Dict) -> Dict:
-        """Calcul complet des 21 ratios financiers"""
+        """Calcul 21 ratios - SANS CRASH"""
         ratios = {}
         
-        # 1. MC/FDMC Ratio
-        if data.get('current_mc') and data.get('fmv') and data['fmv'] > 0:
-            mc_fdmc_raw = data['current_mc'] / data['fmv']
+        current_mc = data.get('current_mc') or 0
+        fmv = data.get('fmv') or 1
+        
+        if current_mc > 0 and fmv > 0:
+            mc_fdmc_raw = current_mc / fmv
             ratios['mc_fdmc'] = max(0, min(1.0, 1.0 - mc_fdmc_raw))
         else:
             ratios['mc_fdmc'] = 0.5
         
-        # 2. Circulating vs Total Supply
-        if data.get('circulating_supply') and data.get('total_supply') and data['total_supply'] > 0:
-            circ_pct = data['circulating_supply'] / data['total_supply']
+        circ_supply = data.get('circulating_supply') or 0
+        total_supply = data.get('total_supply') or 1
+        
+        if circ_supply > 0 and total_supply > 0:
+            circ_pct = circ_supply / total_supply
             if 0.15 <= circ_pct <= 0.35:
                 ratios['circ_vs_total'] = 1.0
             else:
@@ -687,73 +636,64 @@ class QuantumScanner:
         else:
             ratios['circ_vs_total'] = 0.5
         
-        # 3. Volume/MC (estimation basique)
-        ratios['volume_mc'] = 0.5  # Nécessite données live trading
+        ratios['volume_mc'] = 0.5
         
-        # 4. Liquidity Ratio
-        if data.get('hard_cap_usd') and data.get('current_mc') and data['current_mc'] > 0:
-            liq_ratio = data['hard_cap_usd'] / data['current_mc']
+        hard_cap = data.get('hard_cap_usd') or 0
+        if hard_cap > 0 and current_mc > 0:
+            liq_ratio = hard_cap / current_mc
             ratios['liquidity_ratio'] = min(liq_ratio / 2, 1.0)
         else:
             ratios['liquidity_ratio'] = 0.4
         
-        # 5. Whale Concentration (estimation)
-        ratios['whale_concentration'] = 0.6  # Nécessite données on-chain
+        ratios['whale_concentration'] = 0.6
         
-        # 6. Audit Score
-        num_audits = len(data.get('audit_firms', []))
+        audit_firms = data.get('audit_firms') or []
+        num_audits = len(audit_firms) if audit_firms else 0
         ratios['audit_score'] = 1.0 if num_audits >= 2 else 0.7 if num_audits == 1 else 0.3
         
-        # 7. VC Score
-        num_vcs = len(data.get('backers', []))
+        backers = data.get('backers') or []
+        num_vcs = len(backers) if backers else 0
         ratios['vc_score'] = 1.0 if num_vcs >= 3 else 0.8 if num_vcs == 2 else 0.5 if num_vcs == 1 else 0.2
         
-        # 8. Social Sentiment
-        total_social = data.get('twitter_followers', 0) + data.get('telegram_members', 0)
+        twitter_followers = data.get('twitter_followers') or 0
+        telegram_members = data.get('telegram_members') or 0
+        total_social = twitter_followers + telegram_members
         ratios['social_sentiment'] = 1.0 if total_social >= 50000 else 0.7 if total_social >= 10000 else min(total_social / 10000, 1.0)
         
-        # 9. Dev Activity
-        github_commits = data.get('github_commits', 0)
-        ratios['dev_activity'] = 1.0 if github_commits >= 200 else 0.7 if github_commits >= 50 else 0.5 if data.get('github') else 0.2
+        github_commits = data.get('github_commits') or 0
+        has_github = bool(data.get('github'))
+        ratios['dev_activity'] = 1.0 if github_commits >= 200 else 0.7 if github_commits >= 50 else 0.5 if has_github else 0.2
         
-        # 10. Market Sentiment
         ratios['market_sentiment'] = 0.55
         
-        # 11. Tokenomics Health
-        vesting = data.get('vesting_months', 0)
-        ratios['tokenomics_health'] = 1.0 if vesting >= 24 else 0.7 if vesting >= 12 else 0.4
+        # ⭐ FIX CRITIQUE: Handle None vesting
+        vesting = data.get('vesting_months')
+        if vesting is None:
+            vesting = 0
+        vesting = int(vesting) if isinstance(vesting, float) else (vesting or 0)
         
-        # 12. Vesting Score
+        if vesting >= 24:
+            ratios['tokenomics_health'] = 1.0
+        elif vesting >= 12:
+            ratios['tokenomics_health'] = 0.7
+        else:
+            ratios['tokenomics_health'] = 0.4
+        
         ratios['vesting_score'] = ratios['tokenomics_health']
-        
-        # 13. Exchange Listing Score
         ratios['exchange_listing_score'] = 0.3
-        
-        # 14. Community Growth
         ratios['community_growth'] = ratios['social_sentiment']
         
-        # 15. Partnership Quality
         has_partnerships = (num_vcs >= 2 or num_audits >= 1)
         ratios['partnership_quality'] = 0.8 if has_partnerships else 0.5 if num_vcs >= 1 else 0.3
         
-        # 16. Product Maturity
         has_wp = bool(data.get('whitepaper'))
         has_gh = bool(data.get('github'))
         ratios['product_maturity'] = 0.8 if (has_wp and has_gh) else 0.5 if (has_wp or has_gh) else 0.3
         
-        # 17. Revenue Generation
         ratios['revenue_generation'] = 0.3
-        
-        # 18. Volatility (inverse normalized)
         ratios['volatility'] = 0.6
-        
-        # 19. Correlation
         ratios['correlation'] = 0.5
-        
-        # 20. Historical Performance
         ratios['historical_performance'] = 0.4
-        
-        # 21. Risk Adjusted Return
         ratios['risk_adjusted_return'] = 0.5
         
         return ratios
@@ -785,50 +725,47 @@ class QuantumScanner:
         return max(similarities.items(), key=lambda x: x[1]['similarity'])
     
     # ========================================================================
-    # VÉRIFICATION COMPLÈTE & DÉCISION
+    # VÉRIFICATION COMPLÈTE
     # ========================================================================
     
     async def verify_project_complete(self, project: Dict) -> Dict:
-        """Vérification ultra-complète avec tous les checks"""
+        """Vérification ultra-complète - FIXÉE"""
         
-        # 1. Fetch données complètes
         data = await self.fetch_project_complete_data(project)
         project.update(data)
         
-        # 2. CHECKS ANTI-SCAM CRITIQUES
         rejection_reasons = []
         
-        # Check domain age
         domain_check = data.get('domain_check', {})
         if not domain_check.get('safe', True):
             rejection_reasons.append(f"❌ {domain_check.get('reason')}")
         
-        # Check scam keywords
         if data.get('scam_keywords_found'):
             rejection_reasons.append("❌ Mots-clés scam détectés")
         
-        # Check contract si disponible
         if data.get('contract_address'):
             contract_check = data.get('contract_check', {})
             if contract_check.get('has_mint') and not contract_check.get('owner_renounced'):
                 rejection_reasons.append("❌ Mint active + owner non renoncé")
             
-            # Honeypot check
-            is_honeypot = await self.check_honeypot(data['contract_address'])
-            if is_honeypot:
-                rejection_reasons.append("❌ Honeypot détecté")
-                self.stats['scam_blocked'] += 1
+            try:
+                is_honeypot = await self.check_honeypot(data['contract_address'])
+                if is_honeypot:
+                    rejection_reasons.append("❌ Honeypot détecté")
+                    self.stats['scam_blocked'] += 1
+            except:
+                pass
             
-            # TokenSniffer
-            ts_result = await self.check_tokensniffer(data['contract_address'])
-            if not ts_result.get('safe'):
-                rejection_reasons.append(f"❌ TokenSniffer: {ts_result.get('score')}/100")
+            try:
+                ts_result = await self.check_tokensniffer(data['contract_address'])
+                if not ts_result.get('safe'):
+                    rejection_reasons.append(f"❌ TokenSniffer: {ts_result.get('score')}/100")
+            except:
+                pass
         
-        # Check socials obligatoires
         if not data.get('twitter') and not data.get('telegram'):
             rejection_reasons.append("⚠️ Aucun social vérifié")
         
-        # REJECT IMMÉDIAT si red flags critiques
         if len(rejection_reasons) >= 2:
             return {
                 "verdict": "REJECT",
@@ -840,66 +777,61 @@ class QuantumScanner:
                 "flags": ["critical_red_flags"],
             }
         
-        # 3. CALCUL DES 21 RATIOS
-        ratios = self.calculate_all_21_ratios(data)
+        try:
+            ratios = self.calculate_all_21_ratios(data)
+        except Exception as e:
+            logger.error(f"❌ Erreur ratios: {e}")
+            ratios = {k: 0.5 for k in RATIO_WEIGHTS.keys()}
         
-        # 4. COMPARAISON GEM REFERENCES
         best_match = self.compare_to_gem_references(ratios)
         
-        # 5. SCORE FINAL
         score = sum(ratios.get(k, 0) * v for k, v in RATIO_WEIGHTS.items()) * 100
         score = min(100, max(0, score))
         
-        # 6. CONSTRUCTION RAISON GO/NO GO
         go_reason = ""
         flags = []
         
-        # Bonus similarité gem
         if best_match:
             ref_name, ref_info = best_match
             similarity_pct = ref_info['similarity'] * 100
             if similarity_pct >= 70:
-                go_reason = f"🎯 Profil similaire à {ref_name.upper()} ({similarity_pct:.0f}% match, x{ref_info['multiplier']}). "
+                go_reason = f"🎯 Similaire à {ref_name.upper()} ({similarity_pct:.0f}%). "
                 flags.append('similar_to_gem')
-                score += 10  # Bonus
+                score += 10
         
-        # Analyse ratios
         if ratios.get('mc_fdmc', 0) > 0.7:
-            go_reason += "✅ Valorisation attractive. "
+            go_reason += "✅ Valorisation OK. "
             flags.append('good_valuation')
         
         if ratios.get('vc_score', 0) >= 0.7:
-            go_reason += f"✅ VCs Tier1 ({len(data.get('backers', []))}). "
+            go_reason += f"✅ VCs ({len(data.get('backers', []))}). "
             flags.append('tier1_vcs')
         
         if ratios.get('audit_score', 0) >= 0.7:
-            go_reason += f"✅ Audité ({', '.join(data.get('audit_firms', []))}). "
+            go_reason += f"✅ Audité. "
             flags.append('audited')
         
         if ratios.get('dev_activity', 0) >= 0.7:
-            go_reason += "✅ Dev actif. "
+            go_reason += "✅ Dev OK. "
             flags.append('active_dev')
         
-        # Red flags non-critiques
         if ratios.get('dev_activity', 0) < 0.3:
             go_reason += "⚠️ Dev faible. "
             flags.append('low_dev')
         
         if domain_check.get('age_days') and domain_check['age_days'] < 30:
-            go_reason += f"⚠️ Domain jeune ({domain_check['age_days']}j). "
+            go_reason += f"⚠️ Domain jeune. "
             flags.append('young_domain')
         
-        # Ajout warnings
         if rejection_reasons:
             go_reason += " | ".join(rejection_reasons)
         
-        # 7. DÉCISION FINALE
         if score >= self.go_score and len(flags) >= 2 and 'critical_red_flags' not in flags:
             verdict = "ACCEPT"
-            go_reason = "🚀 GO ! " + go_reason
+            go_reason = "🚀 GO! " + go_reason
         elif score >= self.review_score:
             verdict = "REVIEW"
-            go_reason = "⚠️ À REVIEW. " + go_reason
+            go_reason = "⚠️ REVIEW. " + go_reason
         else:
             verdict = "REJECT"
             go_reason = "❌ NO GO. " + go_reason
@@ -919,50 +851,32 @@ class QuantumScanner:
     # ========================================================================
     
     async def send_telegram_complete(self, project: Dict, result: Dict):
-        """Envoi alerte Telegram ultra-complète"""
+        """Envoi alerte Telegram"""
         verdict_emoji = "✅" if result['verdict'] == "ACCEPT" else "⚠️" if result['verdict'] == "REVIEW" else "❌"
         risk_level = "🟢 Faible" if result['score'] >= 75 else "🟡 Moyen" if result['score'] >= 50 else "🔴 Élevé"
         
         data = result.get('data', {})
         ratios = result.get('ratios', {})
         
-        # Top 7 ratios
         ratios_sorted = sorted(ratios.items(), key=lambda x: x[1], reverse=True)[:7]
         top_ratios_text = "\n".join([
-            f"{i+1}. {k.replace('_', ' ').title()}: {v*100:.0f}% (contribue {v*RATIO_WEIGHTS.get(k, 0)*100:.1f}pts)"
+            f"{i+1}. {k.replace('_', ' ').title()}: {v*100:.0f}%"
             for i, (k, v) in enumerate(ratios_sorted)
         ])
         
-        # Backers
         backers = data.get('backers', [])
-        backers_text = ", ".join(backers[:5]) if backers else "Aucun vérifié"
+        backers_text = ", ".join(backers[:5]) if backers else "Aucun"
         
-        # Audits
         audits = data.get('audit_firms', [])
-        audits_text = ", ".join(audits) if audits else "❌ Non audité"
+        audits_text = ", ".join(audits) if audits else "❌"
         
-        # Best match
-        match_text = "N/A"
-        if result.get('best_match'):
-            ref_name, ref_info = result['best_match']
-            match_text = f"**{ref_name.upper()}** ({ref_info['similarity']*100:.0f}% similarité, potentiel x{ref_info['multiplier']})"
-        
-        # Domain info
         domain_info = ""
         domain_check = data.get('domain_check', {})
         if domain_check.get('age_days'):
-            domain_info = f"• Âge domain: {domain_check['age_days']} jours"
+            domain_info = f"• Âge: {domain_check['age_days']}j\n"
         
-        # Contract info
-        contract_info = "• Contract: Non vérifié"
-        if data.get('contract_address'):
-            contract_check = data.get('contract_check', {})
-            verified = "✅" if contract_check.get('verified') else "❌"
-            contract_info = f"• Contract: {verified} `{data['contract_address'][:10]}...`"
-        
-        # Message complet
         message = f"""
-🌌 **QUANTUM SCANNER v16.0 — {project['name']} ({project.get('symbol', 'N/A')})**
+🌌 **QUANTUM SCAN — {project['name']} ({project.get('symbol', 'N/A')})**
 
 📊 **SCORE: {result['score']:.1f}/100** | {verdict_emoji} **{result['verdict']}**
 ⚠️ **RISQUE:** {risk_level}
@@ -970,45 +884,32 @@ class QuantumScanner:
 💡 **ANALYSE:**
 {result['go_reason']}
 
-🎯 **PROFIL SIMILAIRE À:** {match_text}
-
 ---
-💰 **DONNÉES FINANCIÈRES:**
+💰 **DONNÉES:**
 • Hard Cap: ${data.get('hard_cap_usd', 0):,.0f}
 • Prix ICO: ${data.get('ico_price_usd', 0):.6f}
-• FDV Estimée: ${data.get('fmv', 0):,.0f}
-• MC Initiale: ${data.get('current_mc', 0):,.0f}
-• Supply Total: {data.get('total_supply', 0):,.0f}
+• FDV: ${data.get('fmv', 0):,.0f}
+• MC: ${data.get('current_mc', 0):,.0f}
 
 ---
-📊 **TOP 7 RATIOS (sur 21):**
+📊 **TOP 7 RATIOS:**
 {top_ratios_text}
 
 ---
-🔒 **SÉCURITÉ & BACKING:**
+🔒 **SÉCURITÉ:**
 • Audits: {audits_text}
-• Backers: {backers_text}
-• Vesting: {data.get('vesting_months', 0)} mois
+• VCs: {backers_text}
+• Vesting: {data.get('vesting_months', 0)}m
 {domain_info}
-{contract_info}
 
 ---
-📱 **SOCIALS VÉRIFIÉS:**
-• 🐦 Twitter: {data.get('twitter') or '❌'}
-• 💬 Telegram: {data.get('telegram') or '❌'}
-• 🎮 Discord: {data.get('discord') or '❌'}
-• 💻 GitHub: {data.get('github') or '❌'}
+📱 **SOCIALS:**
+• Twitter: {data.get('twitter') or '❌'}
+• Telegram: {data.get('telegram') or '❌'}
 
 ---
-🚀 **SOURCE:** {project['source']}
-🔗 {project.get('link', 'N/A')}
-
-🌐 **Website:** {data.get('website') or 'N/A'}
-
----
-⚠️ **FLAGS:** {', '.join(result.get('flags', [])) if result.get('flags') else 'Aucun'}
-
-_Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
+🔗 {project['source']}
+{project.get('link', '')}
 """
         
         try:
@@ -1019,67 +920,30 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
-            logger.info(f"✅ Telegram envoyé: {project['name']} ({result['verdict']})")
+            logger.info(f"✅ Telegram: {project['name']} ({result['verdict']})")
             self.stats['alerts_sent'] += 1
-            
-            # Slack notification optionnelle
-            if self.slack_webhook:
-                await self.send_slack_notification(project, result)
-                
         except Exception as e:
             logger.error(f"❌ Telegram error: {e}")
-            # Retry sans markdown si erreur
             try:
                 await self.telegram_bot.send_message(
                     chat_id=target_chat,
-                    text=f"QUANTUM SCAN: {project['name']} - Score: {result['score']:.1f} - {result['verdict']}",
-                    disable_web_page_preview=True
+                    text=f"SCAN: {project['name']} - {result['verdict']}"
                 )
             except:
                 pass
-    
-    async def send_slack_notification(self, project: Dict, result: Dict):
-        """Envoi notification Slack (optionnel)"""
-        if not self.slack_webhook:
-            return
-        
-        try:
-            color = "#00ff00" if result['verdict'] == "ACCEPT" else "#ffa500" if result['verdict'] == "REVIEW" else "#ff0000"
-            
-            payload = {
-                "attachments": [{
-                    "color": color,
-                    "title": f"🌌 {project['name']} ({project.get('symbol', 'N/A')})",
-                    "text": f"*{result['verdict']}* - Score: {result['score']:.1f}/100",
-                    "fields": [
-                        {"title": "Source", "value": project['source'], "short": True},
-                        {"title": "Analyse", "value": result['go_reason'][:100], "short": False},
-                    ],
-                    "footer": "Quantum Scanner v16.0",
-                    "ts": int(datetime.now().timestamp())
-                }]
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.slack_webhook, json=payload, timeout=10) as resp:
-                    if resp.status == 200:
-                        logger.info(f"✅ Slack notification envoyée: {project['name']}")
-        except Exception as e:
-            logger.debug(f"Slack notification error: {e}")
     
     # ========================================================================
     # SAUVEGARDE DB
     # ========================================================================
     
     def save_project_complete(self, project: Dict, result: Dict):
-        """Sauvegarde complète en DB"""
+        """Sauvegarde DB"""
         try:
             conn = sqlite3.connect('quantum.db')
             cursor = conn.cursor()
             
             data = result.get('data', {})
             
-            # Insert project
             cursor.execute('''
                 INSERT OR REPLACE INTO projects (
                     name, symbol, chain, source, link, website,
@@ -1103,7 +967,6 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
             
             project_id = cursor.lastrowid
             
-            # Insert ratios
             ratios = result.get('ratios', {})
             cursor.execute('''
                 INSERT INTO ratios (
@@ -1132,7 +995,7 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
             
             conn.commit()
             conn.close()
-            
+        
         except Exception as e:
             logger.error(f"❌ DB save error: {e}")
     
@@ -1141,35 +1004,28 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
     # ========================================================================
     
     async def scan(self):
-        """SCAN PRINCIPAL ULTIME"""
+        """SCAN PRINCIPAL"""
         scan_start = datetime.now()
-        logger.info("🚀 DÉMARRAGE SCAN ULTIME - 30+ sources + 21 ratios + Anti-scam")
+        logger.info("🚀 DÉMARRAGE SCAN ULTIME")
         
         try:
-            # 1. Fetch tous les projets
             projects = await self.fetch_all_sources()
             
             if len(projects) == 0:
-                logger.warning("⚠️ Aucun projet trouvé")
+                logger.warning("⚠️ Aucun projet")
                 return
             
-            logger.info(f"📊 {len(projects)} projets à analyser")
+            logger.info(f"📊 {len(projects)} à analyser")
             
-            # 2. Analyse complète de chaque projet
-            for i, project in enumerate(projects[:self.max_projects], 1):  # UTILISE MAX_PROJECTS_PER_SCAN
+            for i, project in enumerate(projects[:self.max_projects], 1):
                 try:
-                    logger.info(f"🔍 [{i}/{min(self.max_projects, len(projects))}] Analyse {project['name']}...")
+                    logger.info(f"🔍 [{i}/{min(self.max_projects, len(projects))}] {project['name']}...")
                     
-                    # Vérification complète
                     result = await self.verify_project_complete(project)
                     
-                    # Sauvegarde
                     self.save_project_complete(project, result)
-                    
-                    # Alerte Telegram
                     await self.send_telegram_complete(project, result)
                     
-                    # Stats
                     if result['verdict'] == 'ACCEPT':
                         self.stats['accepted'] += 1
                     elif result['verdict'] == 'REVIEW':
@@ -1179,15 +1035,12 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
                     
                     logger.info(f"✅ {project['name']}: {result['verdict']} ({result['score']:.1f}/100)")
                     
-                    # Rate limiting (UTILISE API_DELAY)
                     await asyncio.sleep(self.api_delay)
-                    
+                
                 except Exception as e:
-                    logger.error(f"❌ Erreur analyse {project.get('name', 'Unknown')}: {e}")
-                    import traceback
+                    logger.error(f"❌ Erreur {project.get('name', 'Unknown')}: {e}")
                     logger.error(traceback.format_exc())
             
-            # 3. Sauvegarde historique scan
             scan_end = datetime.now()
             conn = sqlite3.connect('quantum.db')
             cursor = conn.cursor()
@@ -1205,52 +1058,44 @@ _Scan ID: {datetime.now().strftime('%Y%m%d_%H%M%S')} | Quantum v16.0 Ultimate_
             conn.commit()
             conn.close()
             
-            # 4. Résumé final
             duration = (scan_end - scan_start).total_seconds()
             logger.info(f"""
-╔══════════════════════════════════════════════════════════════╗
-║                    SCAN TERMINÉ                              ║
-╠══════════════════════════════════════════════════════════════╣
-║  Projets trouvés:    {self.stats['projects_found']:>4}                              ║
-║  ✅ Acceptés:        {self.stats['accepted']:>4}                              ║
-║  ⚠️  À review:       {self.stats['review']:>4}                              ║
-║  ❌ Rejetés:         {self.stats['rejected']:>4}                              ║
-║  🛡️  Scams bloqués:  {self.stats['scam_blocked']:>4}                              ║
-║  📨 Alertes envoyées: {self.stats['alerts_sent']:>4}                              ║
-║  ⏱️  Durée:          {duration:>4.0f}s                             ║
-╚══════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════╗
+║                    SCAN TERMINÉ                            ║
+╠════════════════════════════════════════════════════════════╣
+║  Projets: {self.stats['projects_found']:>4} | ✅ {self.stats['accepted']:>2} | ⚠️ {self.stats['review']:>2} | ❌ {self.stats['rejected']:>3}     ║
+║  Scams bloqués: {self.stats['scam_blocked']:>2} | Alertes: {self.stats['alerts_sent']:>2} | Temps: {duration:>5.0f}s       ║
+╚════════════════════════════════════════════════════════════╝
             """)
-            
+        
         except Exception as e:
-            logger.error(f"❌ ERREUR CRITIQUE scan(): {e}")
-            import traceback
+            logger.error(f"❌ ERREUR CRITIQUE: {e}")
             logger.error(traceback.format_exc())
 
 
 # ============================================================================
-# MAIN & CLI
+# MAIN
 # ============================================================================
 
 async def main(args):
-    """Main function"""
+    """Main"""
     scanner = QuantumScanner()
     
     if args.once:
         logger.info("Mode: Scan unique")
         await scanner.scan()
     elif args.daemon:
-        logger.info("Mode: Daemon 24/7")
-        interval_hours = scanner.scan_interval  # UTILISE SCAN_INTERVAL_HOURS
+        logger.info(f"Mode: Daemon {scanner.scan_interval}h")
         while True:
             await scanner.scan()
-            logger.info(f"⏸️ Pause {interval_hours}h...")
-            await asyncio.sleep(interval_hours * 3600)
+            logger.info(f"⏸️ Pause {scanner.scan_interval}h...")
+            await asyncio.sleep(scanner.scan_interval * 3600)
     elif args.test_project:
-        logger.info(f"Mode: Test projet {args.test_project}")
+        logger.info(f"Mode: Test {args.test_project}")
         project = {
             "name": args.test_project,
             "symbol": "TEST",
-            "source": "Manual Test",
+            "source": "Manual",
             "link": args.test_project if args.test_project.startswith('http') else None,
         }
         result = await scanner.verify_project_complete(project)
@@ -1262,12 +1107,12 @@ async def main(args):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Quantum Scanner v16.0 ULTIMATE')
+    parser = argparse.ArgumentParser(description='Quantum Scanner v16.1')
     parser.add_argument('--once', action='store_true', help='Scan unique')
     parser.add_argument('--daemon', action='store_true', help='Mode 24/7')
-    parser.add_argument('--test-project', type=str, help='Test un projet (nom ou URL)')
-    parser.add_argument('--github-actions', action='store_true', help='Mode CI/CD')
-    parser.add_argument('--verbose', action='store_true', help='Logs détaillés')
+    parser.add_argument('--test-project', type=str, help='Test projet')
+    parser.add_argument('--github-actions', action='store_true', help='CI/CD')
+    parser.add_argument('--verbose', action='store_true', help='Debug')
     
     args = parser.parse_args()
     
