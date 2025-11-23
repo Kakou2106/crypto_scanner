@@ -1,29 +1,153 @@
-# Configuration Quantum Scanner - Version Simple
+# Quantum Scanner v6.0 - Configuration
+scanner:
+  go_score: 70
+  review_score: 40
+  max_market_cap_eur: 210000
+  scan_interval_hours: 6
+  max_projects_per_scan: 50
+  http_timeout: 30
+  api_delay: 1.0
 
 launchpads:
-  - name: Binance Launchpad
-    url: https://launchpad.binance.com/en/api/projects
-    enabled: true
-    priority: 1
+  tier1:
+    - name: "Binance Launchpad"
+      url: "https://launchpad.binance.com/en/api/projects"
+      enabled: true
+      priority: 10
     
-  - name: TrustPad
-    url: https://trustpad.io/api/projects  
-    enabled: true
-    priority: 2
+    - name: "CoinList"
+      url: "https://coinlist.co/api/v1/token_sales"
+      enabled: true
+      priority: 9
+      requires_auth: true
     
-  - name: Seedify
-    url: https://launchpad.seedify.fund/api/idos
+    - name: "Polkastarter"
+      url: "https://api.polkastarter.com/graphql"
+      enabled: true
+      priority: 8
+    
+    - name: "TrustPad"
+      url: "https://trustpad.io/api/projects"
+      enabled: true
+      priority: 7
+    
+    - name: "Seedify"
+      url: "https://launchpad.seedify.fund/api/idos"
+      enabled: true
+      priority: 7
+
+  tier2:
+    - name: "RedKite"
+      url: "https://redkite.polkafoundry.com/api/projects"
+      enabled: true
+      priority: 6
+    
+    - name: "BSCStation"
+      url: "https://bscstation.finance/api/pools"
+      enabled: true
+      priority: 5
+    
+    - name: "DAO Maker"
+      url: "https://daolauncher.com/api/shos"
+      enabled: true
+      priority: 5
+    
+    - name: "DuckSTARTER"
+      url: "https://duckstarter.io/api/projects"
+      enabled: true
+      priority: 4
+    
+    - name: "GameFi"
+      url: "https://gamefi.org/api/idos"
+      enabled: true
+      priority: 4
+
+  tier3:
+    - name: "DxSale Locks"
+      url: "https://dx.app/api/locks"
+      enabled: true
+      priority: 3
+    
+    - name: "Team.Finance Locks"
+      url: "https://www.team.finance/api/locks"
+      enabled: true
+      priority: 3
+    
+    - name: "UNCX Locks"
+      url: "https://uncx.network/api/locks"
+      enabled: true
+      priority: 2
+    
+    - name: "Enjinstarter"
+      url: "https://enjinstarter.com/api/idos"
+      enabled: true
+      priority: 2
+    
+    - name: "PAID Network"
+      url: "https://ignition.paid.network/api/idos"
+      enabled: true
+      priority: 1
+
+antiscam:
+  databases:
+    - name: "CryptoScamDB"
+      url: "https://api.cryptoscamdb.org/v1/check"
+      enabled: true
+    
+    - name: "Chainabuse"
+      url: "https://www.chainabuse.com/api/reports/address"
+      enabled: true
+    
+    - name: "MetaMask Phishing"
+      url: "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json"
+      enabled: true
+    
+    - name: "TokenSniffer"
+      url: "https://api.tokensniffer.com/v2/tokens"
+      enabled: true
+    
+    - name: "Honeypot.is"
+      url: "https://api.honeypot.is/v1/GetHoneypotStatus"
+      enabled: true
+
+  security_thresholds:
+    min_domain_age_days: 7
+    min_ssl_grade: "A"
+    max_blacklist_matches: 0
+    min_security_score: 60
+
+notifications:
+  telegram:
     enabled: true
-    priority: 3
+    accept_channel: "main"
+    review_channel: "review"
+    format: "detailed"
+  
+  formats:
+    accept: |
+      🌌 QUANTUM SCANNER - PROJET ACCEPTÉ
+      
+      🚀 {name} ({symbol})
+      📊 Score: {score}/100
+      💰 MC: {market_cap}€
+      
+      🔗 {link}
+    
+    review: |
+      ⚠️ QUANTUM SCANNER - REVUE REQUISE
+      
+      🚀 {name} ({symbol})  
+      📊 Score: {score}/100
+      
+      🔗 {link}
 
-ratios:
-  weights:
-    mc_fdmc: 0.15
-    liquidity_ratio: 0.12
-    audit_score: 0.10
-    dev_activity: 0.08
-    community_growth: 0.05
+database:
+  path: "quantum.db"
+  backup_interval_hours: 24
+  retention_days: 30
 
-security:
-  min_domain_age_days: 7
-  required_socials: 1
+logging:
+  level: "INFO"
+  file: "logs/quantum.log"
+  max_size_mb: 100
+  retention_days: 7

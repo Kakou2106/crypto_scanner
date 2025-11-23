@@ -2,16 +2,17 @@ name: Quantum Scanner 24/7
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *'  # Toutes les 6 heures
+  workflow_dispatch:  # Déclenchement manuel
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
       
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -19,30 +20,56 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: Install core dependencies only
+      - name: Install dependencies
         run: |
-          pip install python-dotenv aiohttp requests beautifulsoup4 lxml web3 pandas numpy aiosqlite python-telegram-bot loguru python-dateutil pytz
-          echo "✅ Dépendances principales installées"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
       
-      - name: Create directories
-        run: mkdir -p logs results
+      - name: Run Quantum Scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_REVIEW: ${{ secrets.TELEGRAM_CHAT_REVIEW }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          BSCSCAN_API_KEY: ${{ secrets.BSCSCAN_API_KEY }}
+          POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
+          INFURA_URL: ${{ secrets.INFURA_URL }}
+          COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
+          GO_SCORE: ${{ secrets.GO_SCORE || '70' }}
+          REVIEW_SCORE: ${{ secrets.REVIEW_SCORE || '40' }}
+          MAX_MARKET_CAP_EUR: ${{ secrets.MAX_MARKET_CAP_EUR || '210000' }}
+          SCAN_INTERVAL_HOURS: ${{ secrets.SCAN_INTERVAL_HOURS || '6' }}
+          MAX_PROJECTS_PER_SCAN: ${{ secrets.MAX_PROJECTS_PER_SCAN || '50' }}
+        run: python main.py --github-actions --once
       
-      - name: Run Scanner
-        run: python main.py
-      
-      - name: Notify Telegram
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: quantum-scan-results-${{ github.run_number }}
+          path: |
+            results/*.json
+            logs/*.log
+            quantum.db
+          retention-days: 7
+      
+      - name: Send Telegram notification
         uses: appleboy/telegram-action@master
+        if: always()
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            {{ if success() }}
-            ✅ Quantum Scan #${{ github.run_number }} RÉUSSI
-            📊 Scan terminé avec succès
-            {{ else }}
-            ❌ Quantum Scan #${{ github.run_number }} ÉCHEC
-            🚨 Erreur pendant l'exécution
-            {{ end }}
-            🔗 Voir les détails: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            ⏰ Prochain scan: 6h
+            ${{ job.status == 'success' && '✅ Quantum Scan RÉUSSI' || '❌ Quantum Scan ÉCHEC' }}
+            
+            📊 Run: #${{ github.run_number }}
+            🔗 Repository: ${{ github.repository }}
+            ⏰ Trigger: ${{ github.event_name }}
+            
+            ${{ job.status == 'success' && '📈 Scan terminé avec succès' || '🚨 Erreur pendant l\'exécution' }}
+            
+            📋 Détails: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ⏳ Prochain scan: 6h
+            
+            _ID: ${{ github.run_id }}_
+          disable_web_page_preview: true
