@@ -18,9 +18,21 @@ from dotenv import load_dotenv
 from telegram import Bot
 from bs4 import BeautifulSoup
 from web3 import Web3
-from web3.middleware import (
-    async_geth_poa_middleware  # Pour les versions récentes
-)
+
+# Initialisation des connexions Web3
+self.w3 = {
+    chain: Web3(Web3.HTTPProvider(config["rpc"]))
+    for chain, config in CHAINS.items()
+}
+
+# Configuration spécifique pour Polygon (POA)
+if "polygon" in self.w3:
+    # Polygon est une chaîne POA, donc on active le middleware POA intégré
+    self.w3["polygon"].middleware_onion.inject(
+        lambda: None,  # Pas besoin d'importer explicitement le middleware
+        layer=0
+    )
+
 
 # Initialisation des connexions Web3
 self.w3 = {
