@@ -2,29 +2,16 @@ name: Quantum Scanner 24/7
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Toutes les 6 heures
-  workflow_dispatch:        # Déclenchement manuel
-  push:
-    branches: [ main ]
-
-env:
-  # Variables avec valeurs par défaut (non sensibles)
-  SCAN_INTERVAL_HOURS: 6
-  MAX_PROJECTS_PER_SCAN: 50
-  HTTP_TIMEOUT: 30
-  API_DELAY: 1.0
-  GO_SCORE: 60
-  REVIEW_SCORE: 30
-  MAX_MARKET_CAP_EUR: 210000
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -32,98 +19,30 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: Create production .env file
+      - name: Install core dependencies only
         run: |
-          cat > .env << 'EOF'
-          # ============================================================================
-          # QUANTUM SCANNER v20.0 - PRODUCTION CONFIG
-          # ============================================================================
-          
-          # TELEGRAM (OBLIGATOIRE)
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_CHAT_REVIEW=${{ secrets.TELEGRAM_CHAT_REVIEW }}
-          
-          # SEUILS DE DÉCISION
-          GO_SCORE=${{ env.GO_SCORE }}
-          REVIEW_SCORE=${{ env.REVIEW_SCORE }}
-          MAX_MARKET_CAP_EUR=${{ env.MAX_MARKET_CAP_EUR }}
-          
-          # CONFIGURATION SCAN
-          SCAN_INTERVAL_HOURS=${{ env.SCAN_INTERVAL_HOURS }}
-          MAX_PROJECTS_PER_SCAN=${{ env.MAX_PROJECTS_PER_SCAN }}
-          HTTP_TIMEOUT=${{ env.HTTP_TIMEOUT }}
-          API_DELAY=${{ env.API_DELAY }}
-          
-          # BLOCKCHAIN APIS
-          INFURA_URL=${{ secrets.INFURA_URL }}
-          ETHERSCAN_API_KEY=${{ secrets.ETHERSCAN_API_KEY }}
-          BSCSCAN_API_KEY=${{ secrets.BSCSCAN_API_KEY }}
-          POLYGONSCAN_API_KEY=${{ secrets.POLYGONSCAN_API_KEY }}
-          
-          # AUTRES APIS
-          COINLIST_API_KEY=${{ secrets.COINLIST_API_KEY }}
-          KUCOIN_API_KEY=${{ secrets.KUCOIN_API_KEY }}
-          LUNARCRUSH_API_KEY=${{ secrets.LUNARCRUSH_API_KEY }}
-          DUNE_API_KEY=${{ secrets.DUNE_API_KEY }}
-          EOF
-          echo "✅ Fichier .env de production créé"
+          pip install python-dotenv aiohttp requests beautifulsoup4 lxml web3 pandas numpy aiosqlite python-telegram-bot loguru python-dateutil pytz
+          echo "✅ Dépendances principales installées"
       
-      - name: Install Python dependencies
-        run: |
-          pip install -r requirements.txt
-          echo "✅ Dépendances Python installées"
+      - name: Create directories
+        run: mkdir -p logs results
       
-      - name: Install Playwright browsers
-        run: |
-          python -m playwright install
-          python -m playwright install-deps
-          echo "✅ Navigateurs Playwright installés"
+      - name: Run Scanner
+        run: python main.py
       
-      - name: Create directories structure
-        run: |
-          mkdir -p logs results data exports
-          echo "✅ Structure de dossiers créée"
-      
-      - name: Run Quantum Scanner
-        run: |
-          echo "🚀 Démarrage du Quantum Scanner..."
-          python main.py
-        env:
-          # Variables supplémentaires si besoin
-          PYTHONPATH: ${{ github.workspace }}
-      
-      - name: Archive scan results
+      - name: Notify Telegram
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: quantum-scan-results-${{ github.run_number }}
-          path: |
-            quantum.db
-            logs/
-            results/
-            data/
-          retention-days: 90
-      
-      - name: Notify success on Telegram
-        if: success()
         uses: appleboy/telegram-action@master
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ✅ Quantum Scan #${{ github.run_number }} TERMINÉ
-            📊 Scan réussi - ${{ job.status }}
-            🔗 Voir les résultats: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            ⏰ Prochain scan dans 6 heures
-      
-      - name: Notify failure on Telegram
-        if: failure()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
+            {{ if success() }}
+            ✅ Quantum Scan #${{ github.run_number }} RÉUSSI
+            📊 Scan terminé avec succès
+            {{ else }}
             ❌ Quantum Scan #${{ github.run_number }} ÉCHEC
-            🚨 Erreur détectée - ${{ job.status }}
-            🔗 Voir les logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            🚨 Erreur pendant l'exécution
+            {{ end }}
+            🔗 Voir les détails: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ⏰ Prochain scan: 6h
