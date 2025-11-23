@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from dotenv import load_dotenv
+from telegram.ext import Application
 from telegram import Bot
 from bs4 import BeautifulSoup
 from web3 import Web3
