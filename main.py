@@ -851,84 +851,214 @@ class QuantumScanner:
     # ========================================================================
     
     async def send_telegram_complete(self, project: Dict, result: Dict):
-        """Envoi alerte Telegram"""
+        """Envoi alerte Telegram ULTRA-COMPLÈTE"""
         verdict_emoji = "✅" if result['verdict'] == "ACCEPT" else "⚠️" if result['verdict'] == "REVIEW" else "❌"
         risk_level = "🟢 Faible" if result['score'] >= 75 else "🟡 Moyen" if result['score'] >= 50 else "🔴 Élevé"
         
         data = result.get('data', {})
         ratios = result.get('ratios', {})
         
-        ratios_sorted = sorted(ratios.items(), key=lambda x: x[1], reverse=True)[:7]
-        top_ratios_text = "\n".join([
-            f"{i+1}. {k.replace('_', ' ').title()}: {v*100:.0f}%"
-            for i, (k, v) in enumerate(ratios_sorted)
-        ])
+        # ===== CALCUL POTENTIEL =====
+        ico_price = data.get('ico_price_usd') or 0.0001
+        current_mc = data.get('current_mc') or 100000
+        fmv = data.get('fmv') or 100000
         
+        if fmv > 0 and current_mc > 0:
+            potential_multiplier = (fmv / current_mc) * 2.5 if current_mc < fmv else 1.5
+        else:
+            potential_multiplier = 1.0
+        
+        exit_price = ico_price * potential_multiplier
+        potential_roi = ((exit_price - ico_price) / ico_price * 100) if ico_price > 0 else 0
+        
+        # ===== BEST MATCH + COMPARAISON =====
+        best_match = result.get('best_match')
+        match_text = "N/A"
+        match_details = ""
+        if best_match:
+            ref_name, ref_info = best_match
+            sim_pct = ref_info['similarity'] * 100
+            mult = ref_info['multiplier']
+            match_text = f"**{ref_name.upper()}** (x{mult})"
+            match_details = f"🎯 {sim_pct:.0f}% similaire à {ref_name.upper()} qui a fait x{mult}\n"
+        
+        # ===== TOP 21 RATIOS (détaillés) =====
+        ratios_sorted = sorted(ratios.items(), key=lambda x: x[1], reverse=True)
+        
+        # Top 7 best
+        top_ratios_text = ""
+        for i, (k, v) in enumerate(ratios_sorted[:7], 1):
+            bar = "🟢" * int(v * 5) + "⚪" * (5 - int(v * 5))
+            top_ratios_text += f"{i}. {k.replace('_', ' ').title()}: {v*100:.0f}% {bar}\n"
+        
+        # Bottom 3 worst
+        worst_ratios_text = ""
+        for i, (k, v) in enumerate(ratios_sorted[-3:], 1):
+            bar = "🔴" * int((1-v) * 5) + "⚪" * (5 - int((1-v) * 5))
+            worst_ratios_text += f"{i}. {k.replace('_', ' ').title()}: {v*100:.0f}% {bar}\n"
+        
+        # ===== INTERPRÉTATION RATIOS =====
+        mc_fdmc_ratio = ratios.get('mc_fdmc', 0.5)
+        if mc_fdmc_ratio > 0.8:
+            valuation_text = "🚀 **SUPER ATTRACTIVE** - Sous-évalué"
+        elif mc_fdmc_ratio > 0.6:
+            valuation_text = "✅ **ATTRACTIVE** - Bonne valorisation"
+        elif mc_fdmc_ratio > 0.4:
+            valuation_text = "⚠️ **CORRECTE** - À surveiller"
+        else:
+            valuation_text = "❌ **CHÈRE** - À risque"
+        
+        vc_score = ratios.get('vc_score', 0)
+        if vc_score >= 0.8:
+            vc_text = "🔥 Backers TIER1"
+        elif vc_score >= 0.5:
+            vc_text = "✅ VCs reconnus"
+        else:
+            vc_text = "⚠️ Peu de backing"
+        
+        audit_score = ratios.get('audit_score', 0)
+        if audit_score >= 0.7:
+            audit_text = "✅ Audité (TIER1)"
+        elif audit_score >= 0.5:
+            audit_text = "⚠️ Audit partiel"
+        else:
+            audit_text = "❌ Non audité"
+        
+        dev_score = ratios.get('dev_activity', 0)
+        if dev_score >= 0.7:
+            dev_text = "🟢 Dev ACTIF"
+        elif dev_score >= 0.4:
+            dev_text = "🟡 Dev moyen"
+        else:
+            dev_text = "🔴 Dev FAIBLE"
+        
+        tokenomics = ratios.get('tokenomics_health', 0)
+        if tokenomics >= 0.8:
+            token_text = "✅ Tokenomics SAINE"
+        elif tokenomics >= 0.6:
+            token_text = "⚠️ Tokenomics OK"
+        else:
+            token_text = "❌ Tokenomics RISQUÉE"
+        
+        # ===== SOCIALS COMPLETS =====
+        twitter = data.get('twitter') or "❌"
+        telegram = data.get('telegram') or "❌"
+        discord = data.get('discord') or "❌"
+        reddit = data.get('reddit') or "❌"
+        github = data.get('github') or "❌"
+        website = data.get('website') or project.get('link') or "❌"
+        
+        socials_text = f"""
+📱 **RÉSEAUX SOCIAUX:**
+🐦 X/Twitter: {twitter}
+💬 Telegram: {telegram}
+🎮 Discord: {discord}
+📖 Reddit: {reddit}
+💻 GitHub: {github}
+🌐 Website: {website}
+"""
+        
+        # ===== LIENS D'ACHAT =====
+        contract = data.get('contract_address')
+        launchpad = project.get('link', '')
+        
+        buy_links = f"""
+💳 **OÙ ACHETER:**
+🚀 Launchpad: {launchpad}
+"""
+        if contract:
+            buy_links += f"🔗 Contract: `{contract[:12]}...{contract[-10:]}`\n"
+            buy_links += f"📊 [Etherscan](https://etherscan.io/token/{contract})\n"
+            buy_links += f"💹 [DexTools](https://www.dextools.io/app/en/ether/pair-explorer/{contract})\n"
+        
+        # ===== MESSAGE FINAL =====
         backers = data.get('backers', [])
-        backers_text = ", ".join(backers[:5]) if backers else "Aucun"
+        backers_text = ", ".join(backers[:3]) if backers else "Aucun"
         
         audits = data.get('audit_firms', [])
         audits_text = ", ".join(audits) if audits else "❌"
         
-        domain_info = ""
         domain_check = data.get('domain_check', {})
-        if domain_check.get('age_days'):
-            domain_info = f"• Âge: {domain_check['age_days']}j\n"
+        domain_age = domain_check.get('age_days', 0)
         
         message = f"""
-🌌 **QUANTUM SCAN — {project['name']} ({project.get('symbol', 'N/A')})**
+🌌 **QUANTUM SCAN ULTRA v16.1**
+**{project['name']} ({project.get('symbol', 'N/A')})**
 
-📊 **SCORE: {result['score']:.1f}/100** | {verdict_emoji} **{result['verdict']}**
-⚠️ **RISQUE:** {risk_level}
+{verdict_emoji} **VERDICT: {result['verdict']}** | 📊 **SCORE: {result['score']:.1f}/100**
+⚠️ Risque: {risk_level} | 🎯 Confiance: {100-abs(50-result['score']):.0f}%
 
-💡 **ANALYSE:**
-{result['go_reason']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
-💰 **DONNÉES:**
+💰 **OPPORTUNITÉ FINANCIÈRE:**
+• Prix ICO: ${ico_price:.6f}
+• Prix Cible: ${exit_price:.6f}
+• ROI Potentiel: **x{potential_multiplier:.1f}** ({potential_roi:.0f}%)
 • Hard Cap: ${data.get('hard_cap_usd', 0):,.0f}
-• Prix ICO: ${data.get('ico_price_usd', 0):.6f}
-• FDV: ${data.get('fmv', 0):,.0f}
-• MC: ${data.get('current_mc', 0):,.0f}
+• FDV: ${fmv:,.0f}
+• MC Actuelle: ${current_mc:,.0f}
 
----
-📊 **TOP 7 RATIOS:**
+{match_details}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 **ANALYSE 21 RATIOS:**
+
+🏆 **TOP 7 FORCES:**
 {top_ratios_text}
 
----
-🔒 **SÉCURITÉ:**
-• Audits: {audits_text}
-• VCs: {backers_text}
-• Vesting: {data.get('vesting_months', 0)}m
-{domain_info}
+⚠️ **TOP 3 FAIBLESSES:**
+{worst_ratios_text}
 
----
-📱 **SOCIALS:**
-• Twitter: {data.get('twitter') or '❌'}
-• Telegram: {data.get('telegram') or '❌'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
----
-🔗 {project['source']}
-{project.get('link', '')}
+🔍 **INTERPRÉTATION DÉTAILLÉE:**
+• Valorisation: {valuation_text}
+• Backing VC: {vc_text} ({len(backers)} backers: {backers_text})
+• Audit: {audit_text} ({audits_text})
+• Développement: {dev_text}
+• Tokenomics: {token_text} ({data.get('vesting_months', 0)}m vesting)
+• Domain Age: {domain_age}j
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{socials_text}
+{buy_links}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 **ANALYSE COMPLÈTE:**
+{result['go_reason']}
+
+🔗 Source: {project['source']}
+⏰ Scan: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
         try:
             target_chat = self.chat_id if result['verdict'] == 'ACCEPT' else self.chat_review
+            
+            # Message principal
             await self.telegram_bot.send_message(
                 chat_id=target_chat,
                 text=message,
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
+            
             logger.info(f"✅ Telegram: {project['name']} ({result['verdict']})")
             self.stats['alerts_sent'] += 1
+            
         except Exception as e:
             logger.error(f"❌ Telegram error: {e}")
+            # Fallback message
             try:
-                await self.telegram_bot.send_message(
-                    chat_id=target_chat,
-                    text=f"SCAN: {project['name']} - {result['verdict']}"
-                )
+                simple_msg = f"""
+🌌 SCAN: {project['name']}
+Score: {result['score']:.0f}/100
+Verdict: {result['verdict']}
+Potentiel: x{potential_multiplier:.1f}
+Prix: ${ico_price:.6f} → ${exit_price:.6f}
+🔗 {project.get('link', 'N/A')}
+"""
+                await self.telegram_bot.send_message(chat_id=target_chat, text=simple_msg)
             except:
                 pass
     
