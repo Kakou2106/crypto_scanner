@@ -25,7 +25,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
+      - name: Create logs directory
+        run: mkdir -p logs results
+      
       - name: Run Quantum Scanner
+        id: scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -35,12 +39,14 @@ jobs:
           POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
           INFURA_URL: ${{ secrets.INFURA_URL }}
           COINLIST_API_KEY: ${{ secrets.COINLIST_API_KEY }}
-          GO_SCORE: ${{ secrets.GO_SCORE || '70' }}
-          REVIEW_SCORE: ${{ secrets.REVIEW_SCORE || '40' }}
+          GO_SCORE: ${{ secrets.GO_SCORE || '60' }}
+          REVIEW_SCORE: ${{ secrets.REVIEW_SCORE || '30' }}
           MAX_MARKET_CAP_EUR: ${{ secrets.MAX_MARKET_CAP_EUR || '210000' }}
           SCAN_INTERVAL_HOURS: ${{ secrets.SCAN_INTERVAL_HOURS || '6' }}
           MAX_PROJECTS_PER_SCAN: ${{ secrets.MAX_PROJECTS_PER_SCAN || '50' }}
-        run: python main.py --github-actions --once
+        run: |
+          python main.py --github-actions --once
+          echo "scan_exit_code=$?" >> $GITHUB_OUTPUT
       
       - name: Upload scan results
         uses: actions/upload-artifact@v4
@@ -48,28 +54,49 @@ jobs:
         with:
           name: quantum-scan-results-${{ github.run_number }}
           path: |
-            results/*.json
-            logs/*.log
+            results/
+            logs/
             quantum.db
           retention-days: 7
       
-      - name: Send Telegram notification
+      - name: Send success notification
         uses: appleboy/telegram-action@master
-        if: always()
+        if: success()
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ${{ job.status == 'success' && '✅ Quantum Scan RÉUSSI' || '❌ Quantum Scan ÉCHEC' }}
+            ✅ Quantum Scan RÉUSSI
             
             📊 Run: #${{ github.run_number }}
             🔗 Repository: ${{ github.repository }}
-            ⏰ Trigger: ${{ github.event_name }}
+            ⏰ Déclenchement: ${{ github.event_name }}
             
-            ${{ job.status == 'success' && '📈 Scan terminé avec succès' || '🚨 Erreur pendant l\'exécution' }}
+            📈 Scan terminé avec succès
+            Prochain scan dans 6 heures
             
             📋 Détails: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            ⏳ Prochain scan: 6h
+            
+            _ID: ${{ github.run_id }}_
+          disable_web_page_preview: true
+      
+      - name: Send failure notification
+        uses: appleboy/telegram-action@master
+        if: failure()
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ❌ Quantum Scan ÉCHEC
+            
+            📊 Run: #${{ github.run_number }}
+            🔗 Repository: ${{ github.repository }}
+            ⏰ Déclenchement: ${{ github.event_name }}
+            
+            🚨 Erreur pendant l'exécution du scanner
+            Veuillez vérifier les logs GitHub
+            
+            📋 Détails: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
             _ID: ${{ github.run_id }}_
           disable_web_page_preview: true
