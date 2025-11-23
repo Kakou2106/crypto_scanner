@@ -1684,44 +1684,119 @@ class QuantumScanner:
             text = text.replace(char, f'\\{char}')
         return text
     
-    async def send_telegram_alert(self, project: Dict, analysis: Dict):
-        """Envoie une alerte Telegram formatée"""
-        try:
-            if not self.telegram_bot:
-                logger.warning("Telegram bot non disponible")
-                return
-            
-            # Déterminer le canal cible
-            if analysis['verdict'] == '✅ GO!':
-                chat_id = self.chat_id
-            elif analysis['verdict'] == '⚠️ REVIEW':
-                chat_id = self.chat_review or self.chat_id
-            else:
-                return  # Pas d'alerte pour les REJECT
-            
-            # Préparation des données
-            name = self.escape_markdown(project.get('name', 'Unknown'))
-            symbol = self.escape_markdown(project.get('symbol', 'N/A'))
-            source = self.escape_markdown(project.get('source', 'Unknown'))
-            chain = self.escape_markdown(project.get('chain', 'Unknown'))
-            
-            score = analysis['score']
-            verdict = analysis['verdict']
-            reason = self.escape_markdown(analysis['reason'])
-            
-            # Données financières
-            hard_cap = float(project.get('hard_cap_usd', 0))
-            ico_price = float(project.get('ico_price_usd', 0))
-            exit_price = analysis.get('exit_price', 0)
-            potential_mult = analysis.get('potential_multiplier', 1.0)
-            current_mc = analysis.get('current_mc_eur', 0)
-            
-            # Ratios top 5
-            ratios = analysis.get('ratios', {})
-            top_ratios = sorted(ratios.items(), key=lambda x: x[1], reverse=True)[:5]
-            
-            # Formatage du message
-            message = f"""
+async def send_telegram_alert(self, project: Dict, analysis: Dict):
+    """Envoie une alerte Telegram formatée"""
+    try:
+        if not self.telegram_bot:
+            logger.warning("Telegram bot non disponible")
+            return
+        
+        # Déterminer le canal cible
+        if analysis['verdict'] == '✅ GO!':
+            chat_id = self.chat_id
+        elif analysis['verdict'] == '⚠️ REVIEW':
+            chat_id = self.chat_review or self.chat_id
+        else:
+            return  # Pas d'alerte pour les REJECT
+        
+        # Préparation des données
+        name = self.escape_markdown(project.get('name', 'Unknown'))
+        symbol = self.escape_markdown(project.get('symbol', 'N/A'))
+        source = self.escape_markdown(project.get('source', 'Unknown'))
+        chain = self.escape_markdown(project.get('chain', 'Unknown'))
+        
+        score = analysis['score']
+        verdict = analysis['verdict']
+        reason = self.escape_markdown(analysis['reason'])
+        
+        # Données financières
+        hard_cap = float(project.get('hard_cap_usd', 0))
+        ico_price = float(project.get('ico_price_usd', 0))
+        exit_price = analysis.get('exit_price', 0)
+        potential_mult = analysis.get('potential_multiplier', 1.0)
+        current_mc = analysis.get('current_mc_eur', 0)
+        
+        # Ratios top 5
+        ratios = analysis.get('ratios', {})
+        top_ratios = sorted(ratios.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        # FORMATAGE CORRIGÉ - SANS BACKSLASH DANS F-STRING
+        message_lines = [
+            f"🌌 *QUANTUM SCAN v6.0* - *{name}* ({symbol})",
+            "",
+            f"*📊 SCORE: {score:.1f}/100* | *🎯 VERDICT: {verdict}*",
+            f"*⚡ RISQUE:* {'🔴 Élevé' if score < 60 else '🟡 Moyen' if score < 80 else '🟢 Faible'} | *🤝 CONFIANCE:* {min(100, int(score) + 20)}%",
+            "",
+            f"*🚀 PHASE:* {source}",
+            f"*⏱️ DÉTECTÉ:* Il y a 0 jours",
+            f"*⛓️ CHAÎNE:* {chain}",
+            "",
+            "----------------------------------------",
+            "",
+            "*💰 FINANCIERS*",
+            f"• *Hard Cap:* ${hard_cap:,.0f}",
+            f"• *Prix ICO:* ${ico_price:.6f}",
+            f"• *Prix Cible:* ${exit_price:.6f}",
+            f"• *MC Estimée:* €{current_mc:,.0f}",
+            f"• *Potentiel ROI:* x{potential_mult:.1f} ({(potential_mult-1)*100:.0f}%)",
+            "",
+            f"*🎯 {reason}*",
+            "",
+            "----------------------------------------",
+            "",
+            "*📊 TOP 5 RATIOS*"
+        ]
+        
+        # Ajouter les ratios
+        for i, (k, v) in enumerate(top_ratios):
+            ratio_name = self.escape_markdown(k.replace("_", " ").title())
+            message_lines.append(f"• {i+1}. {ratio_name}: *{v*100:.0f}%*")
+        
+        message_lines.extend([
+            "",
+            "----------------------------------------",
+            "",
+            "*🛡️ SÉCURITÉ*",
+            f"• *Anti-Scam:* {'🟢 PASS' if analysis.get('scam_checks', {}).get('overall_safe') else '🔴 FAIL'}",
+            f"• *Audit:* {'🟢 TIER1' if ratios.get('audit_score', 0) > 0.8 else '🟡 BASIC' if ratios.get('audit_score', 0) > 0.5 else '🔴 NONE'}",
+            f"• *VC Backing:* {'🟢 FORT' if ratios.get('vc_score', 0) > 0.7 else '🟡 MOYEN' if ratios.get('vc_score', 0) > 0.4 else '🔴 FAIBLE'}",
+            "",
+            "*📱 SOCIALS*",
+            f"• *Twitter:* {'✅' if project.get('twitter') else '❌'}",
+            f"• *Telegram:* {'✅' if project.get('telegram') else '❌'}",
+            f"• *Website:* {'✅' if project.get('website') else '❌'}",
+            f"• *GitHub:* {'✅' if project.get('github') else '❌'}",
+            "",
+            "----------------------------------------",
+            "",
+            f"*🔗 LIENS*",
+            f"[Site]({self.escape_markdown(project.get('website', ''))}) | [Twitter]({self.escape_markdown(project.get('twitter', ''))}) | [Telegram]({self.escape_markdown(project.get('telegram', ''))}) | [Launchpad]({self.escape_markdown(project.get('link', ''))})",
+            "",
+            f"*💡 PARTICIPATION*",
+            f"Consulter le launchpad pour les détails de participation",
+            "",
+            "----------------------------------------",
+            "",
+            f"⚠️ *DISCLAIMER:* Early-stage = risque élevé. DYOR. Pas de conseil financier.",
+            "",
+            f"*ID:* {hash(project.get('name', ''))} | *{datetime.now().strftime('%Y-%m-%d %H:%M')}*"
+        ])
+        
+        message = "\n".join(message_lines)
+        
+        await self.telegram_bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            disable_web_page_preview=True
+        )
+        
+        logger.info(f"📨 Telegram alert sent: {project.get('name')} ({verdict})")
+        self.stats['alerts_sent'] += 1
+        
+    except Exception as e:
+        logger.error(f"Error sending Telegram alert: {e}")
+
 🌌 *QUANTUM SCAN v6\\.0* \\- *{name}* \\({symbol}\\)
 
 *📊 SCORE: {score:.1f}/100* \\| *🎯 VERDICT: {verdict}*
