@@ -11,47 +11,13 @@ import sqlite3
 import os
 import re
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from dotenv import load_dotenv
 from telegram import Bot
 from bs4 import BeautifulSoup
 from web3 import Web3
-
-# Initialisation des connexions Web3
-self.w3 = {
-    chain: Web3(Web3.HTTPProvider(config["rpc"]))
-    for chain, config in CHAINS.items()
-}
-
-# Configuration spécifique pour Polygon (POA)
-if "polygon" in self.w3:
-    # Polygon est une chaîne POA, donc on active le middleware POA intégré
-    self.w3["polygon"].middleware_onion.inject(
-        lambda: None,  # Pas besoin d'importer explicitement le middleware
-        layer=0
-    )
-
-
-# Initialisation des connexions Web3
-self.w3 = {
-    chain: Web3(Web3.HTTPProvider(config["rpc"]))
-    for chain, config in CHAINS.items()
-}
-
-# Ajout du middleware POA uniquement pour Polygon (si nécessaire)
-if "polygon" in self.w3:
-    try:
-        # Essaye d'abord avec async_geth_poa_middleware (versions récentes)
-        self.w3["polygon"].middleware_onion.inject(
-            async_geth_poa_middleware,
-            layer=0
-        )
-    except ImportError:
-        # Si ça échoue, ignore (ou utilise une autre méthode)
-        pass
-
 
 # Chargement des variables d'environnement
 load_dotenv()
@@ -64,6 +30,13 @@ logger.add(
     compression="zip",
     level="INFO"
 )
+
+# Définition des chaînes blockchain (CHAINS doit être défini avant utilisation)
+CHAINS = {
+    "eth": {"rpc": os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/'), "explorer": "https://etherscan.io"},
+    "bsc": {"rpc": "https://bsc-dataseed.binance.org/", "explorer": "https://bscscan.com"},
+    "polygon": {"rpc": "https://polygon-rpc.com/", "explorer": "https://polygonscan.com"},
+}
 
 # Projets de référence (pépites)
 REFERENCE_PROJECTS = {
@@ -99,13 +72,6 @@ TIER1_VCS = [
     "Polychain", "Pantera Capital", "Dragonfly Capital", "Multicoin Capital"
 ]
 
-# Configuration des chaînes blockchain
-CHAINS = {
-    "eth": {"rpc": os.getenv('INFURA_URL', 'https://mainnet.infura.io/v3/'), "explorer": "https://etherscan.io"},
-    "bsc": {"rpc": "https://bsc-dataseed.binance.org/", "explorer": "https://bscscan.com"},
-    "polygon": {"rpc": "https://polygon-rpc.com/", "explorer": "https://polygonscan.com"},
-}
-
 class QuantumScanner:
     def __init__(self):
         logger.info("🌌 Quantum Scanner v17.0 - INITIALISATION")
@@ -126,9 +92,6 @@ class QuantumScanner:
             chain: Web3(Web3.HTTPProvider(config["rpc"]))
             for chain, config in CHAINS.items()
         }
-        for chain in self.w3:
-            if "polygon" in chain:
-                self.w3[chain].middleware_onion.inject(geth_poa_middleware, layer=0)
 
         # Stats
         self.stats = {
@@ -225,19 +188,16 @@ class QuantumScanner:
     async def check_scam(self, contract_address: str, chain: str = "eth") -> bool:
         """Vérifie si un contrat est un scam (honeypot, rug pull, etc.)."""
         try:
-            # 1. Vérifier si le contrat est vérifié
             data = await self.fetch_etherscan_data(contract_address, chain)
             if not data or data.get("status") != "1":
                 return True  # Non vérifié = suspect
 
-            # 2. Vérifier les privilèges du owner (ex: mint, blacklist)
             abi = json.loads(data["result"])
             contract = self.w3[chain].eth.contract(address=contract_address, abi=abi)
             owner = contract.functions.owner().call()
             if owner == "0x0000000000000000000000000000000000000000":
                 return False
 
-            # 3. Vérifier les fonctions dangereuses
             dangerous_functions = [
                 "mint", "blacklist", "pause", "setFee", "setTax",
                 "transferOwnership", "renounceOwnership"
@@ -245,9 +205,6 @@ class QuantumScanner:
             for func in dangerous_functions:
                 if any(func in str(item) for item in abi):
                     return True
-
-            # 4. Vérifier la liquidité (si < 50% locked = suspect)
-            # (À implémenter avec des appels à PancakeSwap/Uniswap)
 
             return False
         except Exception as e:
@@ -265,7 +222,6 @@ class QuantumScanner:
                         soup = BeautifulSoup(html, 'lxml')
                         text = soup.get_text()
 
-                        # Extraction des tokens (symboles)
                         tokens = re.findall(r'\b([A-Z]{3,10})\b', text)
                         exclude = {'TOKEN', 'SALE', 'IDO', 'ICO', 'LAUNCH', 'NEW', 'BUY', 'SELL', 'TRADE',
                                    'USD', 'BTC', 'ETH', 'BNB', 'USDT', 'BUSD', 'USDC', 'DAI', 'SOL'}
@@ -299,7 +255,6 @@ class QuantumScanner:
             ("CoinGecko New", "https://www.coingecko.com/en/coins/recently_added"),
             ("DexTools Hot", "https://www.dextools.io/app/en/hot-pairs"),
             ("DexScreener", "https://dexscreener.com/"),
-            # Ajouter d'autres sources ici...
         ]
 
         tasks = [self.fetch_source(name, url) for name, url in sources]
@@ -310,7 +265,6 @@ class QuantumScanner:
             if isinstance(result, list):
                 all_projects.extend(result)
 
-        # Suppression des doublons
         seen = set()
         unique = []
         for p in all_projects:
@@ -340,7 +294,6 @@ class QuantumScanner:
                         soup = BeautifulSoup(html, 'lxml')
                         text = soup.get_text()
 
-                        # Extraction des liens sociaux
                         links = soup.find_all('a', href=True)
                         for link in links:
                             href = link.get('href', '').lower()
@@ -355,7 +308,6 @@ class QuantumScanner:
                             elif '.pdf' in href or 'whitepaper' in href.lower():
                                 data['whitepaper'] = link.get('href')
 
-                        # Extraction des données financières
                         for pattern in [
                             r'\$?([\d,.]+)\s*(million|M|m)\s*(?:hard\s*cap|raise)',
                             r'(?:hard\s*cap|raise)[\s:]*\$?([\d,.]+)\s*(million|M|m)?'
@@ -368,7 +320,6 @@ class QuantumScanner:
                                 data['hard_cap_usd'] = num
                                 break
 
-                        # Extraction du prix ICO
                         for pattern in [
                             r'\$?([\d.]+)\s*(?:per\s*token|price)',
                             r'(?:price|token\s*price)[\s:]*\$?([\d.]+)'
@@ -378,7 +329,6 @@ class QuantumScanner:
                                 data['ico_price_usd'] = float(match.group(1))
                                 break
 
-                        # Extraction du total supply
                         for pattern in [
                             r'([\d,]+\.?\d*)\s*(billion|million|B|M)\s*(?:total\s*)?supply',
                             r'(?:total\s*)?supply[\s:]*([\d,]+\.?\d*)\s*(billion|million|B|M)?'
@@ -394,7 +344,6 @@ class QuantumScanner:
                                 data['total_supply'] = num
                                 break
 
-                        # Extraction des backers et auditeurs
                         for vc in TIER1_VCS:
                             if vc.lower() in text.lower():
                                 data['backers'].append(vc)
@@ -402,23 +351,19 @@ class QuantumScanner:
                             if auditor.lower() in text.lower():
                                 data['audit_firms'].append(auditor)
 
-                        # Extraction de l'adresse du contrat
                         contract_pattern = r'0x[a-fA-F0-9]{40}'
                         match = re.search(contract_pattern, text)
                         if match:
                             data['contract_address'] = match.group(0)
-                            # Détection de la chaîne (ETH, BSC, etc.)
                             for chain in CHAINS:
                                 if chain in text.lower():
                                     data['chain'] = chain
                                     break
 
-                        # Calcul du FMV et du market cap initial
                         if data['ico_price_usd'] and data['total_supply']:
                             data['fmv'] = data['ico_price_usd'] * data['total_supply']
-                            data['current_mc'] = data['fmv'] * 0.25  # 25% en circulation
+                            data['current_mc'] = data['fmv'] * 0.25
 
-                        # Vérification si scam
                         if data['contract_address'] and data['chain']:
                             data['is_scam'] = await self.check_scam(data['contract_address'], data['chain'])
 
@@ -431,14 +376,12 @@ class QuantumScanner:
         """Calcule les 21 ratios financiers."""
         ratios = {}
 
-        # 1. MC/FDMC
         if data.get('current_mc') and data.get('fmv') and data['fmv'] > 0:
             mc_fdmc_raw = data['current_mc'] / data['fmv']
             ratios['mc_fdmc'] = max(0, min(1.0, 1.0 - mc_fdmc_raw))
         else:
             ratios['mc_fdmc'] = 0.5
 
-        # 2. Circulating vs Total Supply
         if data.get('total_supply') and data.get('current_mc') and data['total_supply'] > 0:
             circ_supply = (data['current_mc'] / data.get('ico_price_usd', 1)) if data.get('ico_price_usd') else 0
             circ_pct = circ_supply / data['total_supply'] if data['total_supply'] > 0 else 0
@@ -449,38 +392,24 @@ class QuantumScanner:
         else:
             ratios['circ_vs_total'] = 0.5
 
-        # 3. Volume/MC (à compléter avec CoinGecko)
         ratios['volume_mc'] = 0.5
-
-        # 4. Liquidity Ratio
-        if data.get('hard_cap_usd') and data.get('current_mc') and data['current_mc'] > 0:
-            liq_ratio = data['hard_cap_usd'] / data['current_mc']
-            ratios['liquidity_ratio'] = min(liq_ratio / 2, 1.0)
-        else:
-            ratios['liquidity_ratio'] = 0.4
-
-        # 5. Whale Concentration (à compléter avec Etherscan)
+        ratios['liquidity_ratio'] = 0.4
         ratios['whale_concentration'] = 0.6
 
-        # 6. Audit Score
         num_audits = len(data.get('audit_firms', []))
         ratios['audit_score'] = 1.0 if num_audits >= 2 else 0.7 if num_audits == 1 else 0.3
 
-        # 7. VC Score
         num_vcs = len(data.get('backers', []))
         ratios['vc_score'] = 1.0 if num_vcs >= 3 else 0.8 if num_vcs == 2 else 0.5 if num_vcs == 1 else 0.2
 
-        # 8. Social Sentiment
         total_social = 0
         if data.get('twitter'):
-            total_social += 10000  # Exemple: à remplacer par un appel API
+            total_social += 10000
         ratios['social_sentiment'] = min(total_social / 10000, 1.0)
 
-        # 9. Dev Activity
-        github_commits = 0  # À remplacer par un appel à l'API GitHub
+        github_commits = 0
         ratios['dev_activity'] = 1.0 if github_commits >= 200 else 0.7 if github_commits >= 50 else 0.5 if data.get('github') else 0.2
 
-        # 10-21. Autres ratios (exemples)
         ratios['market_sentiment'] = 0.55
         ratios['tokenomics_health'] = 0.8 if data.get('vesting_months', 0) >= 12 else 0.4
         ratios['vesting_score'] = ratios['tokenomics_health']
