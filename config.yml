@@ -1,12 +1,16 @@
-# Quantum Scanner v6.0 - Configuration
+# Quantum Scanner Configuration
+version: "6.0"
+
 scanner:
-  go_score: 60
-  review_score: 30
-  max_market_cap_eur: 210000
-  scan_interval_hours: 6
+  interval_hours: 6
   max_projects_per_scan: 50
   http_timeout: 30
   api_delay: 1.0
+
+thresholds:
+  go_score: 70
+  review_score: 40
+  max_market_cap_eur: 210000
 
 launchpads:
   tier1:
@@ -14,23 +18,23 @@ launchpads:
       url: "https://launchpad.binance.com/en/api/projects"
       enabled: true
       priority: 10
-
+    
     - name: "CoinList"
       url: "https://coinlist.co/api/v1/token_sales"
       enabled: true
       priority: 9
-      requires_auth: true
-
+      auth_required: true
+    
     - name: "Polkastarter"
       url: "https://api.polkastarter.com/graphql"
       enabled: true
       priority: 8
-
+    
     - name: "TrustPad"
       url: "https://trustpad.io/api/projects"
       enabled: true
-      priority: 7
-
+      priority: 8
+    
     - name: "Seedify"
       url: "https://launchpad.seedify.fund/api/idos"
       enabled: true
@@ -41,24 +45,24 @@ launchpads:
       url: "https://redkite.polkafoundry.com/api/projects"
       enabled: true
       priority: 6
-
+    
     - name: "BSCStation"
       url: "https://bscstation.finance/api/pools"
       enabled: true
-      priority: 5
-
+      priority: 6
+    
     - name: "DAO Maker"
       url: "https://daolauncher.com/api/shos"
       enabled: true
       priority: 5
-
+    
     - name: "DuckSTARTER"
       url: "https://duckstarter.io/api/projects"
       enabled: true
       priority: 4
-
-    - name: "GameFi"
-      url: "https://gamefi.org/api/idos"
+    
+    - name: "Enjinstarter"
+      url: "https://enjinstarter.com/api/idos"
       enabled: true
       priority: 4
 
@@ -67,22 +71,22 @@ launchpads:
       url: "https://dx.app/api/locks"
       enabled: true
       priority: 3
-
+    
     - name: "Team.Finance Locks"
       url: "https://www.team.finance/api/locks"
       enabled: true
       priority: 3
-
+    
     - name: "UNCX Locks"
       url: "https://uncx.network/api/locks"
       enabled: true
       priority: 2
-
-    - name: "Enjinstarter"
-      url: "https://enjinstarter.com/api/idos"
+    
+    - name: "GameFi"
+      url: "https://gamefi.org/api/idos"
       enabled: true
-      priority: 如此一来2
-
+      priority: 2
+    
     - name: "PAID Network"
       url: "https://ignition.paid.network/api/idos"
       enabled: true
@@ -91,49 +95,65 @@ launchpads:
 antiscam:
   databases:
     - name: "CryptoScamDB"
-      url: "https://api.cryptoscamdb.org/v1/check"
       enabled: true
-
+      priority: 10
+    
     - name: "Chainabuse"
-      url: "https://www.chainabuse.com/api/reports/address"
       enabled: true
-
+      priority: 9
+    
     - name: "MetaMask Phishing"
-      url: "https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/master/src/config.json"
       enabled: true
-
+      priority: 8
+    
     - name: "TokenSniffer"
-      url: "https://api.tokensniffer.com/v2/tokens"
       enabled: true
-
+      priority: 8
+    
     - name: "Honeypot.is"
-      url: "https://api.honeypot.is/v1/GetHoneypotStatus"
       enabled: true
+      priority: 7
+    
+    - name: "Certik Skynet"
+      enabled: true
+      priority: 6
+    
+    - name: "VirusTotal"
+      enabled: false  # Nécessite API key
+      priority: 5
+    
+    - name: "RugDoc"
+      enabled: true
+      priority: 4
 
-  security_thresholds:
-    min_domain_age_days: 7
-    min_ssl_grade: "A"
-    max_blacklist_matches: 0
-    min_security_score: 60
-
-notifications:
-  telegram:
-    enabled: true
-    accept_channel: "main"
-    review_channel: "review"
-    format: "detailed"
-
-  formats:
-    accept: "QUANTUM SCANNER - PROJET ACCEPTE\n\n{name} ({symbol})\nScore: {score}/100\nMC: {market_cap}€\n\n{link}"
-    review: "QUANTUM SCANNER - REVUE REQUISE\n\n{name} ({symbol})\nScore: {score}/100\n\n{link}"
+telegram:
+  accept_template: "accept_message.md"
+  review_template: "review_message.md"
+  max_message_length: 4096
 
 database:
   path: "quantum.db"
   backup_interval_hours: 24
-  retention_days: 30
+  max_backups: 7
 
 logging:
   level: "INFO"
-  file: "logs/quantum.log"
+  file: "logs/quantum_scanner.log"
   max_size_mb: 100
-  retention_days: 7
+  backup_count: 5
+
+notifications:
+  telegram:
+    enabled: true
+    max_alerts_per_hour: 10
+  
+  slack:
+    enabled: false
+  
+  email:
+    enabled: false
+
+security:
+  max_retries: 3
+  retry_delay: 5
+  rate_limit_per_minute: 60
