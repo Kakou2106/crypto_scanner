@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 from telegram import Bot
 from bs4 import BeautifulSoup
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3.middleware import async_geth_poa_middleware
+
 
 # Chargement des variables d'environnement
 load_dotenv()
